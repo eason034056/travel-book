@@ -1,0 +1,71 @@
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-paper: #f6f1e7;
+  --color-sand: #ddd1bf;
+  --color-olive: #66735a;
+  --color-terracotta: #bf6c4d;
+  --color-ink: #1f2a3a;
+  --color-mist: #f2ece2;
+  --background-grain:
+    radial-gradient(circle at 15% 20%, rgba(191, 108, 77, 0.1), transparent 26%),
+    radial-gradient(circle at 82% 12%, rgba(102, 115, 90, 0.12), transparent 24%),
+    radial-gradient(circle at 75% 80%, rgba(31, 42, 58, 0.08), transparent 30%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(246, 241, 231, 0.95), rgba(242, 236, 226, 0.94)),
+    var(--background-grain);
+  color: var(--color-ink);
+  font-family: "Hanken Grotesk", "Avenir Next", sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(90deg, rgba(31, 42, 58, 0.03) 1px, transparent 1px),
+    linear-gradient(rgba(31, 42, 58, 0.03) 1px, transparent 1px);
+  background-size: 36px 36px;
+  content: "";
+  mask-image: radial-gradient(circle at center, black 30%, transparent 85%);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+textarea,
+input,
+button {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(191, 108, 77, 0.22);
+}
+
