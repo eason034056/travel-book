@@ -1,9 +1,9 @@
-import type { TripDetail } from "@/types/travel";
+import type { TripSummary } from "@/types/travel";
 
 import { TripCard } from "@/components/trips/trip-card";
 
 interface TripsArchiveProps {
-  trips: TripDetail[];
+  trips: TripSummary[];
 }
 
 export function TripsArchive({ trips }: TripsArchiveProps) {
@@ -64,4 +64,3 @@ export function TripsArchive({ trips }: TripsArchiveProps) {
     </main>
   );
 }
-

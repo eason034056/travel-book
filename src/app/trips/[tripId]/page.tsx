@@ -1,7 +1,8 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { TripDetailScene } from "@/components/trips/trip-detail-scene";
-import { getTripById } from "@/data/mock-trips";
+import { getTripForViewer } from "@/lib/server/travel-service";
+import { getViewerEmail } from "@/lib/server/session";
 
 interface TripPageProps {
   params: Promise<{
@@ -11,7 +12,13 @@ interface TripPageProps {
 
 export default async function TripPage({ params }: TripPageProps) {
   const { tripId } = await params;
-  const trip = getTripById(tripId);
+  const viewerEmail = await getViewerEmail();
+
+  if (!viewerEmail) {
+    redirect(`/sign-in?next=/trips/${tripId}` as never);
+  }
+
+  const trip = await getTripForViewer(tripId, viewerEmail);
 
   if (!trip) {
     notFound();
@@ -19,4 +26,3 @@ export default async function TripPage({ params }: TripPageProps) {
 
   return <TripDetailScene trip={trip} />;
 }
-
