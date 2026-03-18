@@ -1,5 +1,9 @@
+"use client";
+
+import { useState } from "react";
 import type { TripDay } from "@/types/travel";
 import { cn, formatDisplayDate } from "@/lib/utils";
+import { PhotoLightbox } from "@/components/trips/photo-lightbox";
 
 interface DayCardProps {
   day: TripDay;
@@ -7,6 +11,8 @@ interface DayCardProps {
 }
 
 export function DayCard({ day, className }: DayCardProps) {
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [lightboxPhotos, setLightboxPhotos] = useState<Array<{ id: string; url: string; alt: string }>>([]);
   return (
     <article
       className={cn(
@@ -74,19 +80,28 @@ export function DayCard({ day, className }: DayCardProps) {
       </div>
 
       <div className="grid gap-4 md:grid-rows-[1.4fr_0.9fr]">
-        <div
-          className="relative min-h-[12rem] overflow-hidden rounded-xl border border-ink/10 bg-sand sm:min-h-0 sm:rounded-[1.75rem]"
+        <button
+          type="button"
+          className="relative min-h-[12rem] overflow-hidden rounded-xl border border-ink/10 bg-sand text-left sm:min-h-0 sm:rounded-[1.75rem] focus:outline-none focus:ring-2 focus:ring-olive/50"
           style={{
             backgroundImage: `linear-gradient(180deg, rgba(31,42,58,0.08), rgba(31,42,58,0.32)), url(${day.heroPhotoUrl})`,
             backgroundSize: "cover",
             backgroundPosition: "center"
           }}
+          onClick={() => {
+            const allPhotos = [
+              { id: `${day.id}-hero`, url: day.heroPhotoUrl, alt: day.title },
+              ...day.gallery.map((p) => ({ id: p.id, url: p.url, alt: p.alt }))
+            ];
+            setLightboxIndex(0);
+            setLightboxPhotos(allPhotos);
+          }}
         >
-          <div className="absolute inset-x-5 bottom-5 rounded-[1.4rem] bg-paper/88 p-4 backdrop-blur">
+          <div className="absolute inset-x-5 bottom-5 rounded-[1.4rem] bg-paper/88 p-4 backdrop-blur pointer-events-none">
             <p className="font-mono text-[0.68rem] uppercase tracking-[0.3em] text-olive">Memory note</p>
             <p className="mt-2 text-sm leading-6 text-ink/80">{day.summary}</p>
           </div>
-        </div>
+        </button>
 
         <div className="grid gap-3 rounded-xl border border-ink/10 bg-sand/50 p-3 sm:rounded-[1.75rem] sm:p-4">
           <div className="flex items-center justify-between">
@@ -94,21 +109,41 @@ export function DayCard({ day, className }: DayCardProps) {
             <p className="text-xs text-ink/55">{day.gallery.length} photo{day.gallery.length === 1 ? "" : "s"}</p>
           </div>
           <div className="flex gap-3 overflow-x-auto pb-2">
-            {day.gallery.map((photo) => (
-              <figure
+            {day.gallery.map((photo, index) => (
+              <button
                 key={photo.id}
-                className="flex-shrink-0 overflow-hidden rounded-[1.2rem] border border-paper/50 bg-paper shadow-sm"
+                type="button"
+                className="flex-shrink-0 overflow-hidden rounded-[1.2rem] border border-paper/50 bg-paper shadow-sm focus:outline-none focus:ring-2 focus:ring-olive/50"
+                onClick={() => {
+                  const allPhotos = [
+                    { id: `${day.id}-hero`, url: day.heroPhotoUrl, alt: day.title },
+                    ...day.gallery.map((p) => ({ id: p.id, url: p.url, alt: p.alt }))
+                  ];
+                  setLightboxIndex(index + 1);
+                  setLightboxPhotos(allPhotos);
+                }}
               >
                 <img
                   alt={photo.alt}
-                  className="h-36 max-w-none transition duration-500 hover:scale-[1.03]"
+                  className="h-36 max-w-none cursor-pointer transition duration-500 hover:scale-[1.03]"
                   src={photo.url}
                 />
-              </figure>
+              </button>
             ))}
           </div>
         </div>
       </div>
+
+      {lightboxPhotos.length > 0 && lightboxIndex !== null && (
+        <PhotoLightbox
+          photos={lightboxPhotos}
+          initialIndex={lightboxIndex}
+          onClose={() => {
+            setLightboxIndex(null);
+            setLightboxPhotos([]);
+          }}
+        />
+      )}
     </article>
   );
 }

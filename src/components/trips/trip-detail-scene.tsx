@@ -1,7 +1,11 @@
+"use client";
+
+import { useState } from "react";
 import type { TripDetail } from "@/types/travel";
 
 import { DayCard } from "@/components/trips/day-card";
 import { OverviewMap } from "@/components/trips/overview-map";
+import { PhotoLightbox } from "@/components/trips/photo-lightbox";
 import { PhotoStrip } from "@/components/trips/photo-strip";
 import { formatCompanionLabel, formatDisplayDate } from "@/lib/utils";
 
@@ -12,6 +16,9 @@ interface TripDetailSceneProps {
 export function TripDetailScene({ trip }: TripDetailSceneProps) {
   const allStops = trip.days.flatMap((day) => day.stops);
   const endingPhotos = resolveEndingPhotos(trip);
+  const [coverLightboxOpen, setCoverLightboxOpen] = useState(false);
+
+  const coverPhoto = { id: `${trip.id}-cover`, url: trip.coverPhotoUrl, alt: trip.title };
 
   return (
     <main className="mx-auto max-w-7xl px-3 py-5 sm:px-6 sm:py-8 lg:px-8">
@@ -35,6 +42,13 @@ export function TripDetailScene({ trip }: TripDetailSceneProps) {
             <div className="space-y-4">
               <h1 className="max-w-4xl font-display text-4xl leading-[0.9] text-ink sm:text-6xl md:text-8xl">{trip.title}</h1>
               <p className="max-w-xl text-base leading-8 text-ink/76 md:text-lg">{trip.summary}</p>
+              <button
+                type="button"
+                className="text-sm text-olive underline-offset-2 hover:underline"
+                onClick={() => setCoverLightboxOpen(true)}
+              >
+                View cover photo
+              </button>
               {trip.viewerRole && (
                 <a
                   className="inline-flex items-center rounded-full border border-ink/10 bg-ink px-5 py-3 text-sm uppercase tracking-[0.22em] text-paper transition hover:bg-olive"
@@ -91,6 +105,14 @@ export function TripDetailScene({ trip }: TripDetailSceneProps) {
           <PhotoStrip photos={endingPhotos} />
         </div>
       </section>
+
+      {coverLightboxOpen && (
+        <PhotoLightbox
+          photos={[coverPhoto]}
+          initialIndex={0}
+          onClose={() => setCoverLightboxOpen(false)}
+        />
+      )}
     </main>
   );
 }

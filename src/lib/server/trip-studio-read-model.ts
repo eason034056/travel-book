@@ -43,7 +43,9 @@ export async function createTripStudioSnapshot({
   const tripStops = workbook.tripStops
     .filter((stop) => stop.trip_id === tripId)
     .sort((left, right) => Number(left.order_index) - Number(right.order_index));
-  const tripPhotos = workbook.tripPhotos.filter((photo) => photo.trip_id === tripId);
+  const tripPhotos = workbook.tripPhotos
+    .filter((photo) => photo.trip_id === tripId)
+    .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
   const days = await Promise.all(
     workbook.tripDays
       .filter((day) => day.trip_id === tripId)
@@ -113,6 +115,7 @@ export async function createTripStudioSnapshot({
       tripPhotos.map(async (photo) => ({
         alt: photo.alt,
         capturedAt: photo.captured_at || undefined,
+        createdAt: photo.created_at || undefined,
         dayId: photo.day_id,
         id: photo.photo_id,
         originalFilename: photo.original_filename,

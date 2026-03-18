@@ -61,6 +61,7 @@ export interface TripStudioPhoto {
   originalFilename: string;
   alt: string;
   capturedAt?: string;
+  createdAt?: string;
   dayId: string;
   status: "ready" | "unassigned";
 }
