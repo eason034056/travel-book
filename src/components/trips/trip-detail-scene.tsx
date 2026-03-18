@@ -62,7 +62,9 @@ export function TripDetailScene({ trip }: TripDetailSceneProps) {
             </div>
           </div>
 
-          <OverviewMap center={trip.mapCenter} stops={allStops} />
+          <div className="flex min-h-0 flex-1 flex-col">
+            <OverviewMap center={trip.mapCenter} stops={allStops} className="min-h-0 flex-1" />
+          </div>
         </div>
       </section>
 

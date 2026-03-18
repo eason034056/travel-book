@@ -183,10 +183,10 @@ export function OverviewMap({ center, stops, className }: OverviewMapProps) {
   const hasCoordinates = stops.some((stop) => stop.lat !== null && stop.lng !== null);
 
   return (
-    <div className={className}>
+    <div className={`flex min-h-0 flex-col ${className ?? ""}`}>
       <div
         ref={ref}
-        className="relative min-h-[18rem] overflow-hidden rounded-[1.8rem] border border-olive/15 bg-[radial-gradient(circle_at_top,rgba(191,108,77,0.12),transparent_35%),linear-gradient(180deg,rgba(246,241,231,0.95),rgba(221,209,191,0.5))]"
+        className="relative min-h-[18rem] flex-1 overflow-hidden rounded-[1.8rem] border border-olive/15 bg-[radial-gradient(circle_at_top,rgba(191,108,77,0.12),transparent_35%),linear-gradient(180deg,rgba(246,241,231,0.95),rgba(221,209,191,0.5))]"
       >
         {!hasCoordinates && (
           <div className="absolute inset-0 flex items-center justify-center text-sm uppercase tracking-[0.25em] text-ink/45">
