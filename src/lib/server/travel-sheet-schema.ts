@@ -13,7 +13,8 @@ export const travelSheetHeaders = {
     "highlight_label",
     "route_summary",
     "map_center_lat",
-    "map_center_lng"
+    "map_center_lng",
+    "ending_photo_ids_csv"
   ],
   tripDays: [
     "day_id",
@@ -87,6 +88,7 @@ export interface TripSheetRow {
   route_summary: string;
   map_center_lat: string;
   map_center_lng: string;
+  ending_photo_ids_csv: string;
 }
 
 export interface TripDaySheetRow {

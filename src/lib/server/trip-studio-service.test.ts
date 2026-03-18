@@ -44,6 +44,7 @@ describe("trip studio service", () => {
     workbook.trips.push({
       cover_photo_url: "",
       end_date: "2026-04-12",
+      ending_photo_ids_csv: "",
       highlight_label: "",
       map_center_lat: "35.6895",
       map_center_lng: "139.6917",
@@ -61,6 +62,7 @@ describe("trip studio service", () => {
     const result = await createTripForViewer({
       payload: {
         coverPhotoValue: "",
+        endingPhotoIds: [],
         days: [
           {
             cityLabel: "Tokyo",
@@ -145,6 +147,7 @@ describe("trip studio service", () => {
         payload: {
           confirmDateShrink: false,
           coverPhotoValue: workbook.trips[0].cover_photo_url,
+          endingPhotoIds: [],
           endDate: "2026-04-12",
           highlightLabel: workbook.trips[0].highlight_label,
           mapCenter: [135.7751, 35.0116],
@@ -175,6 +178,7 @@ describe("trip studio service", () => {
         payload: {
           confirmDateShrink: false,
           coverPhotoValue: workbook.trips[0].cover_photo_url,
+          endingPhotoIds: [],
           endDate: "2026-04-12",
           highlightLabel: workbook.trips[0].highlight_label,
           mapCenter: [135.7751, 35.0116],
@@ -204,6 +208,7 @@ describe("trip studio service", () => {
       payload: {
         confirmDateShrink: true,
         coverPhotoValue: workbook.trips[0].cover_photo_url,
+        endingPhotoIds: [],
         endDate: "2026-04-12",
         highlightLabel: workbook.trips[0].highlight_label,
         mapCenter: [135.7751, 35.0116],

@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Toaster } from "sonner";
 
 import "@/app/globals.css";
+import "maplibre-gl/dist/maplibre-gl.css";
 
 export const metadata: Metadata = {
   title: "Travel Book",

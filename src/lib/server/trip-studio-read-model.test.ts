@@ -43,6 +43,7 @@ describe("trip studio read model", () => {
       trip_id: "kyoto-2026"
     });
     workbook.trips[0].cover_photo_url = "trips/kyoto-2026/cover.jpg";
+    workbook.trips[0].ending_photo_ids_csv = "photo-1,kyoto-day-2-photo-1";
     workbook.tripDays[0].hero_photo_url = "trips/kyoto-2026/cover.jpg";
 
     const snapshot = await createTripStudioSnapshot({
@@ -61,6 +62,7 @@ describe("trip studio read model", () => {
       expect.objectContaining({ email: "guest@example.com", inviteId: "invite-1" })
     ]);
     expect(snapshot?.coverPhotoPreviewUrl).toBe("signed:trips/kyoto-2026/cover.jpg");
+    expect(snapshot?.endingPhotoIds).toEqual(["photo-1", "kyoto-day-2-photo-1"]);
     expect(snapshot?.days[0].heroPhotoPreviewUrl).toBe("signed:trips/kyoto-2026/cover.jpg");
     expect(snapshot?.photos).toEqual(expect.arrayContaining([
       expect.objectContaining({

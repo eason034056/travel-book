@@ -16,6 +16,7 @@ export const trips: TripDetail[] = [
     highlightLabel: "The trip we learned to walk slower.",
     routeSummary: "Fushimi Inari -> Sannenzaka -> Gion -> Arashiyama -> Kyoto Station",
     mapCenter: [135.7751, 35.0116],
+    endingPhotoIds: ["kyoto-day-1-photo-2", "kyoto-day-2-photo-1", "kyoto-day-1-photo-1"],
     days: [
       {
         id: "kyoto-day-1",
@@ -137,6 +138,7 @@ export const trips: TripDetail[] = [
     highlightLabel: "A city that looked hand-painted from every hill.",
     routeSummary: "Alfama -> Baixa -> Belém -> Cais do Sodré",
     mapCenter: [-9.1427, 38.7369],
+    endingPhotoIds: ["lisbon-photo-1"],
     days: [
       {
         id: "lisbon-day-1",

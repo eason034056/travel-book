@@ -11,6 +11,7 @@ interface TripDetailSceneProps {
 
 export function TripDetailScene({ trip }: TripDetailSceneProps) {
   const allStops = trip.days.flatMap((day) => day.stops);
+  const endingPhotos = resolveEndingPhotos(trip);
 
   return (
     <main className="mx-auto max-w-7xl px-3 py-5 sm:px-6 sm:py-8 lg:px-8">
@@ -62,9 +63,7 @@ export function TripDetailScene({ trip }: TripDetailSceneProps) {
             </div>
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col">
-            <OverviewMap center={trip.mapCenter} stops={allStops} className="min-h-0 flex-1" />
-          </div>
+          <OverviewMap center={trip.mapCenter} stops={allStops} />
         </div>
       </section>
 
@@ -89,9 +88,24 @@ export function TripDetailScene({ trip }: TripDetailSceneProps) {
           </p>
         </div>
         <div className="mt-6">
-          <PhotoStrip photos={trip.days.flatMap((day) => day.gallery).slice(0, 3)} />
+          <PhotoStrip photos={endingPhotos} />
         </div>
       </section>
     </main>
   );
+}
+
+function resolveEndingPhotos(trip: TripDetail) {
+  const allGalleryPhotos = trip.days.flatMap((day) => day.gallery);
+
+  if (trip.endingPhotoIds.length === 0) {
+    return allGalleryPhotos.slice(0, 3);
+  }
+
+  const galleryById = new Map(allGalleryPhotos.map((photo) => [photo.id, photo]));
+  const selectedPhotos = trip.endingPhotoIds
+    .map((photoId) => galleryById.get(photoId))
+    .filter((photo) => photo !== undefined);
+
+  return selectedPhotos.length > 0 ? selectedPhotos : allGalleryPhotos.slice(0, 3);
 }

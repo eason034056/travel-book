@@ -15,6 +15,7 @@ const createTripSchema = z.object({
   routeSummary: z.string(),
   mapCenter: z.tuple([z.number(), z.number()]),
   coverPhotoValue: z.string(),
+  endingPhotoIds: z.array(z.string()),
   days: z.array(
     z.object({
       date: z.string().min(1),

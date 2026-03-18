@@ -60,6 +60,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
   const [highlightLabel, setHighlightLabel] = useState(initialSnapshot?.highlightLabel ?? "");
   const [routeSummary, setRouteSummary] = useState(initialSnapshot?.routeSummary ?? "");
   const [coverPhotoValue, setCoverPhotoValue] = useState(initialSnapshot?.coverPhotoValue ?? "");
+  const [endingPhotoIds, setEndingPhotoIds] = useState<string[]>(initialSnapshot?.endingPhotoIds ?? []);
   const [days, setDays] = useState<StudioDayDraft[]>(() => toStudioDays(initialSnapshot));
   const [photos, setPhotos] = useState<TripStudioPhoto[]>(initialSnapshot?.photos ?? []);
   const [pendingInviteEmail, setPendingInviteEmail] = useState("");
@@ -91,6 +92,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
     setHighlightLabel(initialSnapshot.highlightLabel);
     setRouteSummary(initialSnapshot.routeSummary);
     setCoverPhotoValue(initialSnapshot.coverPhotoValue);
+    setEndingPhotoIds(initialSnapshot.endingPhotoIds);
     setDays(toStudioDays(initialSnapshot));
     setPhotos(initialSnapshot.photos);
     setStopDraftDayId(initialSnapshot.days[0]?.id ?? "");
@@ -105,12 +107,20 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
   const isOwner = initialSnapshot?.viewerRole === "owner";
 
   const allStops = useMemo(() => days.flatMap((d) => d.stops), [days]);
+  const readyPhotosForEndingSelection = useMemo(
+    () => photos.filter((photo) => photo.status === "ready" && Boolean(photo.dayId)),
+    [photos]
+  );
 
   const mapCenter = useMemo((): [number, number] => {
     const withCoords = allStops.filter((s) => s.lat !== null && s.lng !== null);
     if (withCoords.length === 0) return [0, 0];
     return computeCentroid(withCoords);
   }, [allStops]);
+
+  useEffect(() => {
+    setEndingPhotoIds((current) => current.filter((photoId) => photos.some((photo) => photo.id === photoId)));
+  }, [photos]);
 
   const [importPreview, setImportPreview] = useState<{
     resolvedCount: number;
@@ -176,6 +186,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
       body: JSON.stringify({
         confirmDateShrink: true,
         coverPhotoValue,
+        endingPhotoIds,
         endDate,
         highlightLabel,
         mapCenter,
@@ -193,7 +204,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
       const payload = (await response.json()) as { message?: string };
       throw new Error(payload.message ?? "Unable to save overview");
     }
-  }, [initialSnapshot, mode, startDate, endDate, coverPhotoValue, highlightLabel, mapCenter, routeSummary, summary, timezone, title, travelCompanions]);
+  }, [initialSnapshot, mode, startDate, endDate, coverPhotoValue, endingPhotoIds, highlightLabel, mapCenter, routeSummary, summary, timezone, title, travelCompanions]);
 
   const overviewAutoSave = useAutosave(overviewSaveFn, 2500);
 
@@ -269,6 +280,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
       const response = await fetch("/api/trips", {
         body: JSON.stringify({
           coverPhotoValue,
+          endingPhotoIds,
           days: days.map((day) => ({
             cityLabel: day.cityLabel,
             date: day.date,
@@ -322,6 +334,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
         body: JSON.stringify({
           confirmDateShrink,
           coverPhotoValue,
+          endingPhotoIds,
           endDate,
           highlightLabel,
           mapCenter,
@@ -777,6 +790,53 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
                         <div className="px-4 py-3 text-sm text-ink/72">Use as cover</div>
                       </button>
                     ))}
+                  </div>
+
+                  <div className="space-y-2 pt-2">
+                    <p className="font-mono text-[0.68rem] uppercase tracking-[0.28em] text-olive">
+                      Trip ending photos
+                    </p>
+                    <p className="text-xs text-ink/62">
+                      Select which photos appear in the final “Last frames worth keeping” section.
+                    </p>
+                    {readyPhotosForEndingSelection.length === 0 ? (
+                      <p className="rounded-[1rem] border border-ink/10 bg-paper px-3 py-2 text-xs text-ink/55">
+                        Upload and assign photos to days first, then you can choose ending photos here.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                        {readyPhotosForEndingSelection.map((photo) => {
+                          const isSelected = endingPhotoIds.includes(photo.id);
+
+                          return (
+                            <button
+                              key={`ending-${photo.id}`}
+                              className={`overflow-hidden rounded-[1rem] border text-left transition ${
+                                isSelected
+                                  ? "border-terracotta/45 ring-1 ring-terracotta/25"
+                                  : "border-ink/10 hover:border-ink/25"
+                              }`}
+                              onClick={() => {
+                                setEndingPhotoIds((current) => {
+                                  const next = current.includes(photo.id)
+                                    ? current.filter((photoId) => photoId !== photo.id)
+                                    : [...current, photo.id];
+
+                                  return next;
+                                });
+                                if (mode === "edit") overviewAutoSave.markDirty();
+                              }}
+                              type="button"
+                            >
+                              <img alt={photo.alt || photo.originalFilename} className="h-20 w-full object-cover" src={photo.previewUrl} />
+                              <p className="truncate px-2 py-1.5 text-[0.65rem] text-ink/55">
+                                {isSelected ? "Selected" : "Tap to add"}
+                              </p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

@@ -42,6 +42,7 @@ interface CreateTripPayload {
   routeSummary: string;
   mapCenter: [number, number];
   coverPhotoValue: string;
+  endingPhotoIds: string[];
   days: EditableTripDayPayload[];
   stops?: CreateTripStopPayload[];
 }
@@ -57,6 +58,7 @@ interface UpdateTripOverviewPayload {
   routeSummary: string;
   mapCenter: [number, number];
   coverPhotoValue: string;
+  endingPhotoIds: string[];
   confirmDateShrink: boolean;
 }
 
@@ -93,6 +95,7 @@ export async function createTripForViewer(options: {
     endDate: options.payload.endDate,
     highlightLabel: options.payload.highlightLabel,
     mapCenter: options.payload.mapCenter,
+      endingPhotoIds: options.payload.endingPhotoIds,
     routeSummary: options.payload.routeSummary,
     startDate: options.payload.startDate,
     summary: options.payload.summary,
@@ -179,6 +182,7 @@ export async function updateTripOverview(options: {
           endDate: options.payload.endDate,
           highlightLabel: options.payload.highlightLabel,
           mapCenter: options.payload.mapCenter,
+          endingPhotoIds: options.payload.endingPhotoIds,
           routeSummary: options.payload.routeSummary,
           startDate: options.payload.startDate,
           summary: options.payload.summary,
@@ -552,13 +556,16 @@ export async function deletePhotoForTrip(options: {
   }
 
   const updatedTrips = workbook.trips.map((trip) => {
-    if (trip.trip_id !== options.tripId || trip.cover_photo_url !== deletedPhoto.storage_key) {
+    if (trip.trip_id !== options.tripId) {
       return trip;
     }
 
+    const endingPhotoIds = parseCsvIds(trip.ending_photo_ids_csv).filter((photoId) => photoId !== options.photoId);
+
     return {
       ...trip,
-      cover_photo_url: ""
+      cover_photo_url: trip.cover_photo_url === deletedPhoto.storage_key ? "" : trip.cover_photo_url,
+      ending_photo_ids_csv: endingPhotoIds.join(",")
     } satisfies TripSheetRow;
   });
   const updatedDays = workbook.tripDays.map((day) => {
@@ -647,6 +654,7 @@ function buildTripRow(options: {
   highlightLabel: string;
   routeSummary: string;
   mapCenter: [number, number];
+  endingPhotoIds: string[];
 }): TripSheetRow {
   return {
     cover_photo_url: options.coverPhotoValue,
@@ -660,6 +668,7 @@ function buildTripRow(options: {
     timezone: options.timezone,
     title: options.title,
     travel_companions_csv: options.travelCompanions.join(","),
+    ending_photo_ids_csv: options.endingPhotoIds.join(","),
     trip_id: options.tripId
   };
 }
@@ -766,4 +775,11 @@ function removedDaysContainData(workbook: TravelSheetWorkbook, tripId: string, r
   ) ||
     workbook.tripStops.some((stop) => stop.trip_id === tripId && removedDayIdSet.has(stop.day_id)) ||
     workbook.tripPhotos.some((photo) => photo.trip_id === tripId && removedDayIdSet.has(photo.day_id));
+}
+
+function parseCsvIds(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }

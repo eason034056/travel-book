@@ -49,7 +49,8 @@ export function buildTravelSheetSeed({
       highlight_label: trip.highlightLabel,
       route_summary: trip.routeSummary,
       map_center_lat: String(trip.mapCenter[1]),
-      map_center_lng: String(trip.mapCenter[0])
+      map_center_lng: String(trip.mapCenter[0]),
+      ending_photo_ids_csv: trip.endingPhotoIds.join(",")
     });
 
     tripMembershipRows.push({

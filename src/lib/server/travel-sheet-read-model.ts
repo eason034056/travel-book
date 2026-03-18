@@ -65,6 +65,13 @@ function compareRowOrder(left: TripStopSheetRow, right: TripStopSheetRow) {
   return Number(left.order_index) - Number(right.order_index);
 }
 
+function parseCsvIds(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export async function createArchiveSnapshot({
   workbook,
   viewerEmail,
@@ -172,6 +179,7 @@ export async function createTripDetailSnapshot({
     highlightLabel: trip.highlight_label,
     routeSummary: trip.route_summary,
     mapCenter: [Number(trip.map_center_lng), Number(trip.map_center_lat)],
+    endingPhotoIds: parseCsvIds(trip.ending_photo_ids_csv),
     days,
     viewerRole: viewerMembership.role
   };

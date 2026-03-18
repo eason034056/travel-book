@@ -49,6 +49,7 @@ export interface TripDetail extends TripSummary {
   highlightLabel: string;
   routeSummary: string;
   mapCenter: [number, number];
+  endingPhotoIds: string[];
   days: TripDay[];
   viewerRole?: TravelRole;
 }
@@ -95,6 +96,7 @@ export interface TripStudioSnapshot {
   highlightLabel: string;
   routeSummary: string;
   mapCenter: [number, number];
+  endingPhotoIds: string[];
   coverPhotoValue: string;
   coverPhotoPreviewUrl: string;
   viewerRole: TravelRole;

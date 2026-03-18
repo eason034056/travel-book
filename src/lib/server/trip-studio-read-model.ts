@@ -10,6 +10,13 @@ interface TripStudioSnapshotOptions {
   signPhotoUrl: (storageKey: string) => Promise<string>;
 }
 
+function parseCsvIds(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export async function createTripStudioSnapshot({
   workbook,
   tripId,
@@ -92,6 +99,7 @@ export async function createTripStudioSnapshot({
     highlightLabel: trip.highlight_label,
     id: trip.trip_id,
     mapCenter: [Number(trip.map_center_lng), Number(trip.map_center_lat)],
+    endingPhotoIds: parseCsvIds(trip.ending_photo_ids_csv),
     pendingInvites: workbook.inviteTokens
       .filter((invite) => invite.trip_id === tripId && invite.status === "pending")
       .map((invite) => ({

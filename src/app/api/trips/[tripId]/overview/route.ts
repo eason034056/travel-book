@@ -15,6 +15,7 @@ const overviewSchema = z.object({
   routeSummary: z.string(),
   mapCenter: z.tuple([z.number(), z.number()]),
   coverPhotoValue: z.string(),
+  endingPhotoIds: z.array(z.string()),
   confirmDateShrink: z.boolean()
 });
 

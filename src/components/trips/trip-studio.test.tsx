@@ -4,6 +4,13 @@ import { afterEach, vi } from "vitest";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn(), back: vi.fn(), forward: vi.fn(), prefetch: vi.fn() })
 }));
+vi.mock("heic2any", () => ({
+  default: vi.fn()
+}));
+vi.mock("@/components/trips/route-editor-map", () => ({
+  RouteEditorMap: () => <div data-testid="route-editor-map" />,
+  computeCentroid: () => [0, 0]
+}));
 
 import { TripStudio } from "@/components/trips/trip-studio";
 import type { TripStudioSnapshot } from "@/types/travel";
@@ -44,6 +51,7 @@ const ownerSnapshot: TripStudioSnapshot = {
   highlightLabel: "",
   id: "kyoto-2026",
   mapCenter: [135.7751, 35.0116],
+  endingPhotoIds: [],
   pendingInvites: [],
   photos: [],
   routeSummary: "",
