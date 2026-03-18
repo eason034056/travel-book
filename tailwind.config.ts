@@ -9,6 +9,7 @@ const config: Config = {
         sand: "var(--color-sand)",
         olive: "var(--color-olive)",
         terracotta: "var(--color-terracotta)",
+        gold: "var(--color-gold)",
         ink: "var(--color-ink)",
         mist: "var(--color-mist)"
       },

@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef } from "react";
 
 import type { PlaceStop } from "@/types/travel";
+import { computeCentroid } from "@/lib/geo-utils";
 
 interface RouteEditorMapProps {
   stops: PlaceStop[];
@@ -156,15 +157,6 @@ interface MapLike {
   on: (event: string, layerOrCallback: any, callback?: (event: any) => void) => void;
 }
 
-function computeCentroid(stops: PlaceStop[]): [number, number] {
-  const withCoords = stops.filter((s) => s.lat !== null && s.lng !== null);
-  if (withCoords.length === 0) return [0, 0];
-
-  const sumLng = withCoords.reduce((acc, s) => acc + (s.lng as number), 0);
-  const sumLat = withCoords.reduce((acc, s) => acc + (s.lat as number), 0);
-  return [sumLng / withCoords.length, sumLat / withCoords.length];
-}
-
 function updateMapData(map: MapLike, mappableStops: PlaceStop[], mapId: string) {
   const coordinates = mappableStops.map((s) => [s.lng as number, s.lat as number]);
 
@@ -240,5 +232,3 @@ function fitBoundsToStops(map: MapLike, stops: PlaceStop[], maplibregl: { LngLat
   }
   map.fitBounds(bounds, { padding: 50, maxZoom: 15 });
 }
-
-export { computeCentroid };
