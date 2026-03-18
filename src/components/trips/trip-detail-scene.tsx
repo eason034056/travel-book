@@ -42,13 +42,6 @@ export function TripDetailScene({ trip }: TripDetailSceneProps) {
             <div className="space-y-4">
               <h1 className="max-w-4xl font-display text-4xl leading-[0.9] text-ink sm:text-6xl md:text-8xl">{trip.title}</h1>
               <p className="max-w-xl text-base leading-8 text-ink/76 md:text-lg">{trip.summary}</p>
-              <button
-                type="button"
-                className="text-sm text-olive underline-offset-2 hover:underline"
-                onClick={() => setCoverLightboxOpen(true)}
-              >
-                View cover photo
-              </button>
               {trip.viewerRole && (
                 <a
                   className="inline-flex items-center rounded-full border border-ink/10 bg-ink px-5 py-3 text-sm uppercase tracking-[0.22em] text-paper transition hover:bg-olive"
