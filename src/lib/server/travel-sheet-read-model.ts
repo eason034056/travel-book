@@ -7,6 +7,7 @@ import type {
   TripSheetRow,
   TripStopSheetRow
 } from "@/lib/server/travel-sheet-schema";
+import { resolveStoredAssetUrl } from "@/lib/server/trip-media";
 
 interface SnapshotOptions {
   workbook: TravelSheetWorkbook;
@@ -80,7 +81,9 @@ export async function createArchiveSnapshot({
         (photo) => photo.trip_id === trip.trip_id && photo.status === "ready"
       );
 
-      if (firstPhoto && !summary.coverPhotoUrl) {
+      if (summary.coverPhotoUrl) {
+        summary.coverPhotoUrl = await resolveStoredAssetUrl(summary.coverPhotoUrl, signPhotoUrl);
+      } else if (firstPhoto) {
         summary.coverPhotoUrl = await resolvePhotoUrl(firstPhoto, signPhotoUrl);
       }
 
@@ -95,7 +98,14 @@ export async function createTripDetailSnapshot({
   tripId,
   signPhotoUrl
 }: TripDetailSnapshotOptions): Promise<TripDetail | undefined> {
-  if (!hasActiveMembership(workbook.tripMemberships, tripId, viewerEmail)) {
+  const viewerMembership = workbook.tripMemberships.find(
+    (membership) =>
+      membership.trip_id === tripId &&
+      membership.email.toLowerCase() === viewerEmail.toLowerCase() &&
+      membership.status === "active"
+  );
+
+  if (!viewerMembership) {
     return undefined;
   }
 
@@ -106,6 +116,7 @@ export async function createTripDetailSnapshot({
   }
 
   const summary = buildTripSummary(trip, workbook);
+  summary.coverPhotoUrl = await resolveStoredAssetUrl(summary.coverPhotoUrl, signPhotoUrl);
   const days = await Promise.all(
     workbook.tripDays
       .filter((day) => day.trip_id === trip.trip_id)
@@ -148,7 +159,7 @@ export async function createTripDetailSnapshot({
           title: day.title,
           summary: day.summary,
           highlightMoment: day.highlight_moment,
-          heroPhotoUrl: day.hero_photo_url,
+          heroPhotoUrl: await resolveStoredAssetUrl(day.hero_photo_url, signPhotoUrl),
           journal: day.journal,
           stops,
           gallery
@@ -161,6 +172,7 @@ export async function createTripDetailSnapshot({
     highlightLabel: trip.highlight_label,
     routeSummary: trip.route_summary,
     mapCenter: [Number(trip.map_center_lng), Number(trip.map_center_lat)],
-    days
+    days,
+    viewerRole: viewerMembership.role
   };
 }

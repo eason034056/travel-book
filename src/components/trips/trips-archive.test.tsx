@@ -8,7 +8,7 @@ test("renders the archive hero and trip cards", () => {
 
   expect(screen.getByRole("heading", { name: /Journeys worth reopening/i })).toBeInTheDocument();
   expect(screen.getByText(/Mobile capture, desktop nostalgia/i)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /start a new trip/i })).toHaveAttribute("href", "/trips/new");
   expect(screen.getByRole("heading", { name: "Kyoto in April" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Lisbon in October" })).toBeInTheDocument();
 });
-

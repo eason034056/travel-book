@@ -91,7 +91,7 @@ async function readTable<T extends object>(table: WorkbookKey): Promise<Array<Ro
   return mapRows<T>(travelSheetHeaders[table], values);
 }
 
-async function appendTableRows<T extends object>(table: WorkbookKey, rows: T[]) {
+export async function appendTableRows<T extends object>(table: WorkbookKey, rows: T[]) {
   if (rows.length === 0) {
     return;
   }
@@ -103,6 +103,22 @@ async function appendTableRows<T extends object>(table: WorkbookKey, rows: T[]) 
     valueInputOption: "RAW",
     requestBody: {
       values: toValues(travelSheetHeaders[table], rows)
+    }
+  });
+}
+
+export async function replaceTableRows<T extends object>(table: WorkbookKey, rows: T[]) {
+  const { client, spreadsheetId } = getSheetsClient();
+  await client.spreadsheets.values.clear({
+    spreadsheetId,
+    range: `${travelSheetTabs[table]}!A:Z`
+  });
+  await client.spreadsheets.values.update({
+    spreadsheetId,
+    range: `${travelSheetTabs[table]}!A1:Z`,
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [Array.from(travelSheetHeaders[table]), ...toValues(travelSheetHeaders[table], rows)]
     }
   });
 }

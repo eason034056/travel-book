@@ -59,4 +59,25 @@ describe("travel sheet read model", () => {
     expect(trip?.days[0].gallery.some((photo) => photo.url.startsWith("signed:"))).toBe(true);
     expect(trip?.days[0].gallery.some((photo) => photo.url.startsWith("https://"))).toBe(true);
   });
+
+  test("signs stored cover and hero image keys for trip detail snapshots", async () => {
+    const workbook = buildTravelSheetSeed({
+      seededAt: "2026-03-17T12:00:00.000Z",
+      trips: mockTrips,
+      ownerEmail: "owner@example.com"
+    });
+
+    workbook.trips[0].cover_photo_url = "trips/kyoto-2026/cover.jpg";
+    workbook.tripDays[0].hero_photo_url = "trips/kyoto-2026/day-1-hero.jpg";
+
+    const trip = await createTripDetailSnapshot({
+      workbook,
+      tripId: "kyoto-2026",
+      viewerEmail: "owner@example.com",
+      signPhotoUrl: async (key) => `signed:${key}`
+    });
+
+    expect(trip?.coverPhotoUrl).toBe("signed:trips/kyoto-2026/cover.jpg");
+    expect(trip?.days[0].heroPhotoUrl).toBe("signed:trips/kyoto-2026/day-1-hero.jpg");
+  });
 });

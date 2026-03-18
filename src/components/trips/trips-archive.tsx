@@ -28,6 +28,14 @@ export function TripsArchive({ trips }: TripsArchiveProps) {
               <span className="rounded-full border border-olive/20 bg-sand/50 px-4 py-2">Two-editor memory book</span>
               <span className="rounded-full border border-olive/20 bg-sand/50 px-4 py-2">Editorial scrapbook UI</span>
             </div>
+            <div className="pt-2">
+              <a
+                className="inline-flex items-center rounded-full border border-ink/10 bg-ink px-5 py-3 text-sm uppercase tracking-[0.22em] text-paper transition hover:bg-olive"
+                href="/trips/new"
+              >
+                Start a new trip
+              </a>
+            </div>
           </div>
           <div className="grid gap-4 rounded-[2rem] border border-ink/10 bg-sand/35 p-5">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -54,13 +62,33 @@ export function TripsArchive({ trips }: TripsArchiveProps) {
         </div>
       </section>
 
-      <section className="mt-10 grid gap-6 md:grid-cols-2">
-        {trips.map((trip) => (
-          <a key={trip.id} className="block" href={`/trips/${trip.id}`}>
-            <TripCard trip={trip} />
+      {trips.length > 0 ? (
+        <section className="mt-10 grid gap-6 md:grid-cols-2">
+          {trips.map((trip) => (
+            <a key={trip.id} className="block" href={`/trips/${trip.id}`}>
+              <TripCard trip={trip} />
+            </a>
+          ))}
+        </section>
+      ) : (
+        <section className="mt-10 flex flex-col items-center rounded-[2.4rem] border border-ink/10 bg-paper px-8 py-16 text-center shadow-card">
+          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-sand/50">
+            <svg className="h-10 w-10 text-olive/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z" />
+            </svg>
+          </div>
+          <h2 className="mt-6 font-display text-4xl leading-none text-ink">No trips yet</h2>
+          <p className="mt-3 max-w-md text-sm leading-7 text-ink/65">
+            Start by pasting a Google Maps link to build your first route, then shape the days with stories and photos.
+          </p>
+          <a
+            className="mt-6 inline-flex items-center rounded-full bg-ink px-6 py-3 text-sm uppercase tracking-[0.22em] text-paper transition hover:bg-olive"
+            href="/trips/new"
+          >
+            Plan your first trip
           </a>
-        ))}
-      </section>
+        </section>
+      )}
     </main>
   );
 }

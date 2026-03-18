@@ -50,6 +50,58 @@ export interface TripDetail extends TripSummary {
   routeSummary: string;
   mapCenter: [number, number];
   days: TripDay[];
+  viewerRole?: TravelRole;
+}
+
+export interface TripStudioPhoto {
+  id: string;
+  storageKey: string;
+  previewUrl: string;
+  originalFilename: string;
+  alt: string;
+  capturedAt?: string;
+  dayId: string;
+  status: "ready" | "unassigned";
+}
+
+export interface TripStudioCollaborator {
+  email: string;
+  role: TravelRole;
+  status: "active" | "revoked";
+  createdAt: string;
+}
+
+export interface TripStudioPendingInvite {
+  inviteId: string;
+  email: string;
+  role: Extract<TravelRole, "editor">;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface TripStudioDay extends Omit<TripDay, "heroPhotoUrl"> {
+  heroPhotoValue: string;
+  heroPhotoPreviewUrl: string;
+}
+
+export interface TripStudioSnapshot {
+  id: string;
+  title: string;
+  startDate: string;
+  endDate: string;
+  timezone: string;
+  summary: string;
+  travelCompanions: string[];
+  highlightLabel: string;
+  routeSummary: string;
+  mapCenter: [number, number];
+  coverPhotoValue: string;
+  coverPhotoPreviewUrl: string;
+  viewerRole: TravelRole;
+  days: TripStudioDay[];
+  photos: TripStudioPhoto[];
+  collaborators: TripStudioCollaborator[];
+  pendingInvites: TripStudioPendingInvite[];
 }
 
 export interface ParsedGoogleMapsLinkResolved {
@@ -86,4 +138,3 @@ export interface UnassignedPhoto {
   photoId: string;
   reason: "missing-captured-at" | "no-matching-day";
 }
-

@@ -1,5 +1,5 @@
 import { TripsArchive } from "@/components/trips/trips-archive";
-import { getArchiveForViewer } from "@/lib/server/travel-service";
+import { getArchiveForViewer } from "@/lib/server/travel-query-service";
 import { getViewerEmail } from "@/lib/server/session";
 import { redirect } from "next/navigation";
 

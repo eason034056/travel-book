@@ -3,8 +3,8 @@ import { describe, expect, test } from "vitest";
 import { buildStopImportRows } from "@/lib/server/google-links-import";
 
 describe("buildStopImportRows", () => {
-  test("persists resolved stops into the selected day and reports unresolved links", () => {
-    const result = buildStopImportRows({
+  test("persists resolved stops into the selected day and reports unresolved links", async () => {
+    const result = await buildStopImportRows({
       tripId: "kyoto-2026",
       dayId: "kyoto-day-2",
       existingStopCount: 3,

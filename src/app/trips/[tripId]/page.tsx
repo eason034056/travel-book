@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 
 import { TripDetailScene } from "@/components/trips/trip-detail-scene";
-import { getTripForViewer } from "@/lib/server/travel-service";
+import { getTripForViewer } from "@/lib/server/travel-query-service";
 import { getViewerEmail } from "@/lib/server/session";
 
 interface TripPageProps {

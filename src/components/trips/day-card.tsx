@@ -10,7 +10,7 @@ export function DayCard({ day, className }: DayCardProps) {
   return (
     <article
       className={cn(
-        "grid gap-6 rounded-[2rem] border border-ink/10 bg-paper/90 p-5 shadow-card backdrop-blur md:grid-cols-[1.05fr_0.95fr] md:p-7",
+        "grid gap-5 rounded-2xl border border-ink/10 bg-paper/90 p-4 shadow-card backdrop-blur sm:gap-6 sm:rounded-[2rem] sm:p-5 md:grid-cols-[1.05fr_0.95fr] md:p-7",
         className
       )}
     >
@@ -18,7 +18,7 @@ export function DayCard({ day, className }: DayCardProps) {
         <div className="flex items-start justify-between gap-5">
           <div>
             <p className="font-mono text-[0.7rem] uppercase tracking-[0.35em] text-olive">Day {day.dayIndex}</p>
-            <h3 className="mt-2 font-display text-3xl leading-none text-ink">Day {day.dayIndex}</h3>
+            <h3 className="mt-2 font-display text-2xl leading-none text-ink sm:text-3xl">Day {day.dayIndex}</h3>
           </div>
           <div className="text-right">
             <p className="font-mono text-xs uppercase tracking-[0.25em] text-ink/55">{day.cityLabel}</p>
@@ -27,24 +27,47 @@ export function DayCard({ day, className }: DayCardProps) {
         </div>
 
         <div className="space-y-3">
-          <h4 className="font-display text-4xl leading-none text-ink">{day.title}</h4>
+          <h4 className="font-display text-2xl leading-none text-ink sm:text-4xl">{day.title}</h4>
           <p className="max-w-xl text-base leading-7 text-ink/80">{day.summary}</p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          {day.stops.map((stop) => (
-            <span
-              key={stop.id}
-              className="rounded-full border border-olive/20 bg-sand/70 px-3 py-1.5 text-xs uppercase tracking-[0.2em] text-ink/75"
-            >
-              {stop.name}
-            </span>
-          ))}
-        </div>
+        {/* Route timeline */}
+        {day.stops.length > 0 && (
+          <div className="rounded-xl border border-ink/8 bg-sand/30 p-3 sm:rounded-[1.5rem] sm:p-4">
+            <p className="font-mono text-[0.68rem] uppercase tracking-[0.3em] text-olive">Route</p>
+            <div className="mt-3 space-y-0">
+              {day.stops.map((stop, index) => (
+                <div key={stop.id} className="flex items-stretch gap-3">
+                  <div className="flex flex-col items-center">
+                    <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-terracotta text-[0.65rem] font-medium text-paper">
+                      {index + 1}
+                    </div>
+                    {index < day.stops.length - 1 && (
+                      <div className="w-px flex-1 bg-olive/20" />
+                    )}
+                  </div>
+                  <div className={cn("pb-3", index === day.stops.length - 1 && "pb-0")}>
+                    <p className="text-sm font-medium leading-6 text-ink/80">{stop.name}</p>
+                    {stop.originalUrl && (
+                      <a
+                        className="text-xs text-olive hover:text-terracotta"
+                        href={stop.originalUrl}
+                        rel="noopener noreferrer"
+                        target="_blank"
+                      >
+                        View on Google Maps
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-        <div className="rounded-[1.5rem] border border-terracotta/20 bg-terracotta/10 p-4">
-          <p className="font-mono text-[0.68rem] uppercase tracking-[0.3em] text-terracotta">Highlight moment</p>
-          <p className="mt-3 font-display text-2xl leading-tight text-ink">{day.highlightMoment}</p>
+        <div className="rounded-xl border border-terracotta/20 bg-terracotta/10 p-3 sm:rounded-[1.5rem] sm:p-4">
+          <p className="font-mono text-[0.68rem] uppercase tracking-[0.3em] text-terracotta">Best moment</p>
+          <p className="mt-2 font-display text-xl leading-tight text-ink sm:mt-3 sm:text-2xl">{day.highlightMoment}</p>
         </div>
 
         <p className="max-w-2xl text-sm leading-7 text-ink/78">{day.journal}</p>
@@ -52,7 +75,7 @@ export function DayCard({ day, className }: DayCardProps) {
 
       <div className="grid gap-4 md:grid-rows-[1.4fr_0.9fr]">
         <div
-          className="relative overflow-hidden rounded-[1.75rem] border border-ink/10 bg-sand"
+          className="relative min-h-[12rem] overflow-hidden rounded-xl border border-ink/10 bg-sand sm:min-h-0 sm:rounded-[1.75rem]"
           style={{
             backgroundImage: `linear-gradient(180deg, rgba(31,42,58,0.08), rgba(31,42,58,0.32)), url(${day.heroPhotoUrl})`,
             backgroundSize: "cover",
@@ -65,26 +88,23 @@ export function DayCard({ day, className }: DayCardProps) {
           </div>
         </div>
 
-        <div className="grid gap-3 rounded-[1.75rem] border border-ink/10 bg-sand/50 p-4">
+        <div className="grid gap-3 rounded-xl border border-ink/10 bg-sand/50 p-3 sm:rounded-[1.75rem] sm:p-4">
           <div className="flex items-center justify-between">
             <p className="font-mono text-[0.68rem] uppercase tracking-[0.3em] text-olive">Gallery</p>
             <p className="text-xs text-ink/55">{day.gallery.length} photo{day.gallery.length === 1 ? "" : "s"}</p>
           </div>
-          <div className="grid grid-cols-[1.5fr_1fr] gap-3">
-            {day.gallery.slice(0, 2).map((photo, index) => (
-              <div
+          <div className="flex gap-3 overflow-x-auto pb-2">
+            {day.gallery.map((photo) => (
+              <figure
                 key={photo.id}
-                className={cn(
-                  "overflow-hidden rounded-[1.2rem] border border-paper/50 bg-paper shadow-sm",
-                  index === 0 ? "min-h-36" : "min-h-36"
-                )}
+                className="flex-shrink-0 overflow-hidden rounded-[1.2rem] border border-paper/50 bg-paper shadow-sm"
               >
                 <img
                   alt={photo.alt}
-                  className="h-full w-full object-cover transition duration-500 hover:scale-[1.03]"
+                  className="h-36 max-w-none transition duration-500 hover:scale-[1.03]"
                   src={photo.url}
                 />
-              </div>
+              </figure>
             ))}
           </div>
         </div>

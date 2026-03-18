@@ -152,7 +152,7 @@ export async function importStopsForTrip(options: {
     (stop) => stop.trip_id === options.tripId && stop.day_id === options.dayId
   ).length;
 
-  const result = buildStopImportRows({
+  const result = await buildStopImportRows({
     tripId: options.tripId,
     dayId: options.dayId,
     existingStopCount,

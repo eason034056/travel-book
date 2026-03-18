@@ -6,13 +6,13 @@ interface PhotoStripProps {
 
 export function PhotoStrip({ photos }: PhotoStripProps) {
   return (
-    <div className="grid gap-3 sm:grid-cols-3">
+    <div className="flex gap-3 overflow-x-auto pb-2">
       {photos.map((photo) => (
         <figure
           key={photo.id}
-          className="overflow-hidden rounded-[1.5rem] border border-paper/70 bg-paper shadow-sm transition duration-500 hover:-translate-y-1 hover:shadow-card"
+          className="flex-shrink-0 overflow-hidden rounded-[1.5rem] border border-paper/70 bg-paper shadow-sm transition duration-500 hover:-translate-y-1 hover:shadow-card"
         >
-          <img alt={photo.alt} className="h-48 w-full object-cover" src={photo.url} />
+          <img alt={photo.alt} className="h-48 max-w-none" src={photo.url} />
         </figure>
       ))}
     </div>

@@ -47,9 +47,11 @@ export function OverviewMap({ center, stops, className }: OverviewMapProps) {
         },
         center,
         zoom: 11.5,
-        interactive: false,
+        interactive: true,
         attributionControl: false
       });
+
+      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
 
       map.on("load", () => {
         const coordinates = stops
@@ -81,20 +83,25 @@ export function OverviewMap({ center, stops, className }: OverviewMapProps) {
           }
         });
 
+        const features = stops
+          .filter((stop) => stop.lat !== null && stop.lng !== null)
+          .map((stop, index) => ({
+            type: "Feature" as const,
+            geometry: {
+              type: "Point" as const,
+              coordinates: [stop.lng as number, stop.lat as number]
+            },
+            properties: {
+              order: index + 1,
+              name: stop.name
+            }
+          }));
+
         map.addSource(`stops-${mapId}`, {
           type: "geojson",
           data: {
             type: "FeatureCollection",
-            features: coordinates.map((coordinate, index) => ({
-              type: "Feature",
-              geometry: {
-                type: "Point",
-                coordinates: coordinate
-              },
-              properties: {
-                order: index + 1
-              }
-            }))
+            features
           }
         });
 
@@ -103,12 +110,63 @@ export function OverviewMap({ center, stops, className }: OverviewMapProps) {
           type: "circle",
           source: `stops-${mapId}`,
           paint: {
-            "circle-radius": 6,
+            "circle-radius": 7,
             "circle-color": "#BF6C4D",
             "circle-stroke-width": 2,
             "circle-stroke-color": "#F6F1E7"
           }
         });
+
+        map.addLayer({
+          id: `stops-label-${mapId}`,
+          type: "symbol",
+          source: `stops-${mapId}`,
+          layout: {
+            "text-field": ["get", "order"],
+            "text-size": 10,
+            "text-offset": [0, -1.6],
+            "text-allow-overlap": true
+          },
+          paint: {
+            "text-color": "#1f2a3a",
+            "text-halo-color": "#F6F1E7",
+            "text-halo-width": 1.5
+          }
+        });
+
+        const popup = new maplibregl.Popup({
+          closeButton: false,
+          closeOnClick: false,
+          offset: 12
+        });
+
+        map.on("mouseenter", `stops-fill-${mapId}`, (e) => {
+          map.getCanvas().style.cursor = "pointer";
+          const feature = e.features?.[0];
+          if (!feature || feature.geometry.type !== "Point") return;
+
+          const coords = feature.geometry.coordinates.slice() as [number, number];
+          const name = feature.properties?.name ?? "";
+          const order = feature.properties?.order ?? "";
+
+          popup
+            .setLngLat(coords)
+            .setHTML(`<div style="font-family:var(--font-body);font-size:13px;padding:2px 6px"><strong>${order}.</strong> ${name}</div>`)
+            .addTo(map);
+        });
+
+        map.on("mouseleave", `stops-fill-${mapId}`, () => {
+          map.getCanvas().style.cursor = "";
+          popup.remove();
+        });
+
+        if (coordinates.length >= 2) {
+          const bounds = new maplibregl.LngLatBounds();
+          for (const coord of coordinates) {
+            bounds.extend(coord as [number, number]);
+          }
+          map.fitBounds(bounds, { padding: 50, maxZoom: 15 });
+        }
       });
 
       return () => map.remove();
@@ -149,4 +207,3 @@ export function OverviewMap({ center, stops, className }: OverviewMapProps) {
     </div>
   );
 }
-

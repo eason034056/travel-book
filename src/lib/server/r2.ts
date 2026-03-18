@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectsCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import { getR2Env } from "@/lib/server/env";
@@ -58,5 +58,24 @@ export async function signTripPhotoUrl(storageKey: string, expiresInSeconds = 30
     {
       expiresIn: expiresInSeconds
     }
+  );
+}
+
+export async function deleteTripStorageKeys(storageKeys: string[]) {
+  const dedupedKeys = Array.from(new Set(storageKeys.filter(Boolean)));
+
+  if (dedupedKeys.length === 0) {
+    return;
+  }
+
+  const { client, bucket } = getClient();
+  await client.send(
+    new DeleteObjectsCommand({
+      Bucket: bucket,
+      Delete: {
+        Objects: dedupedKeys.map((key) => ({ Key: key })),
+        Quiet: true
+      }
+    })
   );
 }
