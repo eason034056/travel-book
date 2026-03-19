@@ -75,6 +75,25 @@ vercel
 - `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` 若含換行，在 Vercel 可貼上整段（含換行），或使用 `\n` 表示換行（與本機 `.env.local` 一致即可）。
 - 部署完成後請把 **正式網址** 填回 Google OAuth 的「已授權的重新導向 URI」  
   （例如 `https://<你的網域>/api/auth/callback/google`），否則登入會失敗。
+- 照片上傳現在是「瀏覽器直傳 R2」，目的是避開 Vercel Function request body 限制，所以 **R2 bucket 一定要設定 CORS**。
+
+建議的 R2 CORS 設定：
+
+```json
+[
+  {
+    "AllowedOrigins": [
+      "http://localhost:3000",
+      "https://<你的正式網域>"
+    ],
+    "AllowedMethods": ["PUT", "GET", "HEAD"],
+    "AllowedHeaders": ["Content-Type"],
+    "ExposeHeaders": ["ETag"]
+  }
+]
+```
+
+若你同時會使用自訂網域與 `*.vercel.app` 網域，兩個 origin 都要加進去。
 
 ---
 
@@ -124,7 +143,7 @@ vercel
   檢查 `AUTH_SECRET`、`APP_URL` 是否為正式網址，以及 Google OAuth 重新導向 URI 是否包含正式網址。
 
 - **照片無法上傳或無法顯示**  
-  檢查 R2 五個環境變數是否正確、R2 bucket 與金鑰權限是否允許上傳與讀取。
+  檢查 R2 五個環境變數是否正確、R2 bucket 與金鑰權限是否允許上傳與讀取，並確認 bucket CORS 已允許 `http://localhost:3000` 與正式網站 origin 的 `PUT` 請求。
 
 - **Google Sheets 讀寫失敗**  
   確認試算表已分享給 `GOOGLE_SERVICE_ACCOUNT_EMAIL`（編輯權限），且 `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` 格式正確。

@@ -16,8 +16,61 @@ function parseCoordinatePair(value: string) {
   return { lat, lng };
 }
 
+function parseCoordinatesFromPath(path: string) {
+  const coordinateMatch = path.match(/\/@(-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?)/);
+
+  if (!coordinateMatch) {
+    return { lat: null, lng: null };
+  }
+
+  return parseCoordinatePair(coordinateMatch[1]);
+}
+
+function buildResolvedPlace(rawUrl: string, name: string, coordinates: { lat: number | null; lng: number | null }): ParsedGoogleMapsLink {
+  return {
+    status: "resolved",
+    kind: "place",
+    originalUrl: rawUrl,
+    stops: [
+      {
+        name,
+        lat: coordinates.lat,
+        lng: coordinates.lng,
+        orderIndex: 0
+      }
+    ]
+  };
+}
+
+function isMapsPath(path: string) {
+  return path === "/maps" || path.startsWith("/maps/");
+}
+
+function hasPlaceIdentifier(url: URL) {
+  return ["ftid", "cid", "query_place_id"].some((key) => {
+    const value = url.searchParams.get(key);
+    return Boolean(value && value.trim());
+  });
+}
+
+function parseQueryStopName(url: URL) {
+  const queryValue = url.searchParams.get("q") ?? url.searchParams.get("query");
+  return queryValue ? decodeMapSegment(queryValue) : null;
+}
+
+export function isGoogleMapsShortLink(rawUrl: string) {
+  try {
+    const url = new URL(rawUrl);
+    const hostname = url.hostname.toLowerCase();
+    return hostname === "maps.app.goo.gl" || hostname === "goo.gl";
+  } catch {
+    return false;
+  }
+}
+
 function isSupportedGoogleHost(hostname: string) {
-  return hostname.includes("google.") || hostname === "maps.google.com" || hostname.endsWith("goo.gl");
+  const normalizedHostname = hostname.toLowerCase();
+  return normalizedHostname.includes("google.") || normalizedHostname === "maps.google.com" || normalizedHostname.endsWith("goo.gl");
 }
 
 export function parseGoogleMapsLink(rawUrl: string): ParsedGoogleMapsLink {
@@ -56,19 +109,7 @@ export function parseGoogleMapsLink(rawUrl: string): ParsedGoogleMapsLink {
       };
     }
 
-    return {
-      status: "resolved",
-      kind: "place",
-      originalUrl: rawUrl,
-      stops: [
-        {
-          name: decodeMapSegment(nameSegment),
-          lat: coordinates.lat,
-          lng: coordinates.lng,
-          orderIndex: 0
-        }
-      ]
-    };
+    return buildResolvedPlace(rawUrl, decodeMapSegment(nameSegment), coordinates);
   }
 
   if (path.includes("/maps/dir/")) {
@@ -99,10 +140,15 @@ export function parseGoogleMapsLink(rawUrl: string): ParsedGoogleMapsLink {
     };
   }
 
+  const singleStopName = isMapsPath(path) && hasPlaceIdentifier(url) ? parseQueryStopName(url) : null;
+
+  if (singleStopName) {
+    return buildResolvedPlace(rawUrl, singleStopName, parseCoordinatesFromPath(path));
+  }
+
   return {
     status: "unresolved",
     originalUrl: rawUrl,
     reason: "unsupported-path"
   };
 }
-

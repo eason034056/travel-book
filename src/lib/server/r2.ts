@@ -9,6 +9,10 @@ function sanitizeFilename(filename: string) {
   return filename.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-").toLowerCase();
 }
 
+function buildTripPhotoStorageKey(tripId: string, originalFilename: string) {
+  return `trips/${tripId}/${crypto.randomUUID()}-${sanitizeFilename(originalFilename)}`;
+}
+
 function getClient() {
   const env = getR2Env();
 
@@ -32,7 +36,7 @@ export async function uploadTripPhoto(options: {
   contentType: string;
 }) {
   const { client, bucket } = getClient();
-  const key = `trips/${options.tripId}/${crypto.randomUUID()}-${sanitizeFilename(options.originalFilename)}`;
+  const key = buildTripPhotoStorageKey(options.tripId, options.originalFilename);
 
   await client.send(
     new PutObjectCommand({
@@ -44,6 +48,34 @@ export async function uploadTripPhoto(options: {
   );
 
   return key;
+}
+
+export async function createTripPhotoUploadTarget(options: {
+  tripId: string;
+  originalFilename: string;
+  contentType: string;
+  expiresInSeconds?: number;
+}) {
+  const { client, bucket } = getClient();
+  const storageKey = buildTripPhotoStorageKey(options.tripId, options.originalFilename);
+
+  return {
+    contentType: options.contentType,
+    originalFilename: options.originalFilename,
+    photoId: `${options.originalFilename}-${crypto.randomUUID()}`,
+    storageKey,
+    uploadUrl: await getSignedUrl(
+      client,
+      new PutObjectCommand({
+        Bucket: bucket,
+        ContentType: options.contentType,
+        Key: storageKey
+      }),
+      {
+        expiresIn: options.expiresInSeconds ?? 300
+      }
+    )
+  };
 }
 
 export async function signTripPhotoUrl(storageKey: string, expiresInSeconds = 300) {

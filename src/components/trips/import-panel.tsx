@@ -1,28 +1,9 @@
 "use client";
 
-import heic2any from "heic2any";
 import { startTransition, useState } from "react";
 
+import { formatTripPhotoUploadProgress, uploadTripPhotosDirect } from "@/lib/trip-photo-upload-client";
 import type { TripDay } from "@/types/travel";
-
-function isHeic(f: File) {
-  return f.type === "image/heic" || f.type === "image/heif" || /\.(heic|heif)$/i.test(f.name);
-}
-
-async function toJpegFiles(files: File[]): Promise<File[]> {
-  const results = await Promise.all(
-    files.map(async (file): Promise<File[]> => {
-      if (!isHeic(file)) return [file];
-      const result = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.92 });
-      const blobs = Array.isArray(result) ? result : [result];
-      const base = file.name.replace(/\.(heic|heif)$/i, "");
-      return blobs.map((blob, i) =>
-        new File([blob], blobs.length > 1 ? `${base}-${i}.jpg` : `${base}.jpg`, { type: "image/jpeg" })
-      );
-    })
-  );
-  return results.flat();
-}
 
 interface ImportPanelProps {
   tripId: string;
@@ -75,36 +56,20 @@ export function ImportPanel({ tripId, timezone, days }: ImportPanelProps) {
       }
 
       if (files.length > 0) {
-        const toUpload = await toJpegFiles(files);
-        const formData = new FormData();
-        formData.set("tripId", tripId);
-        formData.set("timezone", timezone);
-        formData.set(
-          "tripDays",
-          JSON.stringify(days.map((day) => ({ id: day.id, date: day.date })))
-        );
-
-        for (const file of toUpload) {
-          formData.append("photos", file);
-        }
-
-        const photoResponse = await fetch("/api/uploads/photos", {
-          method: "POST",
-          body: formData
+        const uploadResult = await uploadTripPhotosDirect({
+          days: days.map((day) => ({ date: day.date, id: day.id })),
+          files,
+          onProgress: (progress) => setPhotoStatus(formatTripPhotoUploadProgress(progress)),
+          timezone,
+          tripId
         });
 
-        if (!photoResponse.ok) {
-          throw new Error("Photo analysis failed");
-        }
-
-        const photoPreview = (await photoResponse.json()) as {
-          assigned: Array<{ photoId: string; dayId: string }>;
-          unassigned: Array<{ photoId: string; reason: string }>;
-        };
-
         setPhotoStatus(
-          `${photoPreview.assigned.length} assigned · ${photoPreview.unassigned.length} pending review`
+          `${uploadResult.assignments.assigned.length} assigned · ${uploadResult.assignments.unassigned.length} pending review${
+            uploadResult.failedCount > 0 ? ` · ${uploadResult.failedCount} failed upload${uploadResult.failedCount === 1 ? "" : "s"}` : ""
+          }`
         );
+        setError(uploadResult.failedCount > 0 ? `${uploadResult.failedCount} photo upload${uploadResult.failedCount === 1 ? "" : "s"} failed` : null);
       }
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Import failed");

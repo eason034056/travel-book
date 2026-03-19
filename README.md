@@ -20,7 +20,8 @@ npm run seed:sheet
 - Google OAuth sign-in
 - One-time invite links
 - `POST /api/import/google-links`
-- `POST /api/uploads/photos`
+- `POST /api/trips/:tripId/photos/upload/prepare`
+- `POST /api/trips/:tripId/photos/upload/complete`
 - `POST /api/trips/:tripId/invite`
 
 ## Environment
@@ -52,7 +53,7 @@ SEED_OWNER_EMAIL=owner@example.com
    - `http://localhost:3000/api/auth/callback/google`
    - `https://<your-production-domain>/api/auth/callback/google`
 2. Create a spreadsheet and share it with the service account email from `.env.local`.
-3. Create a private R2 bucket and issue S3-compatible access keys.
+3. Create a private R2 bucket, issue S3-compatible access keys, and allow browser `PUT` uploads from `http://localhost:3000` plus your production origin in the bucket CORS policy.
 4. Run `npm run seed:sheet` once to create the initial tabs and seed the mock trips as owner-visible data.
 5. Start the app with `npm run dev`.
 

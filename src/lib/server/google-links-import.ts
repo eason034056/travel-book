@@ -1,27 +1,118 @@
 import crypto from "node:crypto";
 
-import { parseGoogleMapsLink } from "@/lib/google-maps-parser";
+import { isGoogleMapsShortLink, parseGoogleMapsLink } from "@/lib/google-maps-parser";
 import type { TripStopSheetRow } from "@/lib/server/travel-sheet-schema";
 
-function isShortGoogleUrl(rawUrl: string): boolean {
+interface TopSearchPlace {
+  name: string;
+  lat: number;
+  lng: number;
+  ftid: string;
+}
+
+function hasPlaceIdentifier(url: URL) {
+  return ["ftid", "cid", "query_place_id"].some((key) => {
+    const value = url.searchParams.get(key);
+    return Boolean(value && value.trim());
+  });
+}
+
+function isGenericSearchMapsUrl(rawUrl: string) {
   try {
     const url = new URL(rawUrl);
-    return url.hostname === "maps.app.goo.gl" || url.hostname === "goo.gl";
+    const path = decodeURIComponent(url.pathname);
+    return path.includes("/maps/search/") && !hasPlaceIdentifier(url);
   } catch {
     return false;
   }
 }
 
+function extractMapSearchPathFromHtml(html: string) {
+  const pathMatch = html.match(/\/search\?tbm=map[^"'\s]+/);
+  if (!pathMatch) return null;
+
+  return pathMatch[0].replace(/&amp;/g, "&");
+}
+
+function parseTopPlaceFromSearchPayload(payload: string): TopSearchPlace | null {
+  const normalizedPayload = payload.replace(/^\)\]\}'\s*\n?/, "");
+  let data: unknown;
+
+  try {
+    data = JSON.parse(normalizedPayload);
+  } catch {
+    return null;
+  }
+
+  if (!Array.isArray(data)) return null;
+
+  for (const section of data) {
+    if (!Array.isArray(section)) continue;
+
+    for (const entry of section) {
+      if (!Array.isArray(entry) || entry.length < 2 || !Array.isArray(entry[1])) continue;
+
+      const details = entry[1];
+      const name = typeof details[11] === "string" ? details[11].trim() : "";
+      const ftid = typeof details[10] === "string" ? details[10].trim() : "";
+      const coordinates = Array.isArray(details[9]) ? details[9] : null;
+      const lat = Number(coordinates?.[2]);
+      const lng = Number(coordinates?.[3]);
+
+      if (!name || !ftid || Number.isNaN(lat) || Number.isNaN(lng)) continue;
+
+      return {
+        name,
+        lat,
+        lng,
+        ftid
+      };
+    }
+  }
+
+  return null;
+}
+
+async function resolveGenericSearchUrl(rawUrl: string): Promise<string | null> {
+  if (!isGenericSearchMapsUrl(rawUrl)) return null;
+
+  try {
+    const mapsPageResponse = await fetch(rawUrl, { redirect: "follow" });
+    if (!mapsPageResponse.ok) return null;
+
+    const mapsPageHtml = await mapsPageResponse.text();
+    const searchPath = extractMapSearchPathFromHtml(mapsPageHtml);
+    if (!searchPath) return null;
+
+    const searchResponse = await fetch(`https://www.google.com${searchPath}`, { redirect: "follow" });
+    if (!searchResponse.ok) return null;
+
+    const searchPayload = await searchResponse.text();
+    const topPlace = parseTopPlaceFromSearchPayload(searchPayload);
+    if (!topPlace) return null;
+
+    const encodedName = encodeURIComponent(topPlace.name);
+    const encodedFtid = encodeURIComponent(topPlace.ftid);
+    return `https://www.google.com/maps/place/${encodedName}/@${topPlace.lat},${topPlace.lng},17z?ftid=${encodedFtid}`;
+  } catch {
+    return null;
+  }
+}
+
 export async function expandShortUrl(rawUrl: string): Promise<string> {
-  if (!isShortGoogleUrl(rawUrl)) return rawUrl;
+  if (!isGoogleMapsShortLink(rawUrl)) return rawUrl;
 
   try {
     const response = await fetch(rawUrl, { method: "HEAD", redirect: "follow" });
-    return response.url || rawUrl;
+    const expandedUrl = response.url || rawUrl;
+    const resolvedUrl = await resolveGenericSearchUrl(expandedUrl);
+    return resolvedUrl ?? expandedUrl;
   } catch {
     try {
       const response = await fetch(rawUrl, { redirect: "follow" });
-      return response.url || rawUrl;
+      const expandedUrl = response.url || rawUrl;
+      const resolvedUrl = await resolveGenericSearchUrl(expandedUrl);
+      return resolvedUrl ?? expandedUrl;
     } catch {
       return rawUrl;
     }

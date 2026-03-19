@@ -22,12 +22,13 @@ import {
   verticalListSortingStrategy
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import heic2any from "heic2any";
 import { GripVertical, Trash2, ArrowRightLeft, ChevronDown, ChevronUp, MapPin, Loader2 } from "lucide-react";
 
+import { formatTripPhotoUploadProgress, uploadTripPhotosDirect } from "@/lib/trip-photo-upload-client";
+import { MAX_TRIP_PHOTO_UPLOADS } from "@/lib/trip-photo-upload-contract";
 import type { PlaceStop, TripStudioPhoto, TripStudioSnapshot } from "@/types/travel";
 import { computeCentroid } from "@/lib/geo-utils";
-import { parseGoogleMapsLink } from "@/lib/google-maps-parser";
+import { isGoogleMapsShortLink, parseGoogleMapsLink } from "@/lib/google-maps-parser";
 import { useAutosave } from "@/hooks/use-autosave";
 
 const RouteEditorMap = dynamic(
@@ -54,6 +55,9 @@ interface StudioDayDraft {
   heroPhotoPreviewUrl: string;
   stops: PlaceStop[];
 }
+
+type MobileEditTab = "photos" | "places" | "stories" | "more";
+type MobilePlacesMode = "add" | "organize";
 
 export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
   const router = useRouter();
@@ -91,9 +95,27 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
   const [highlightedSectionId, setHighlightedSectionId] = useState<string | null>(null);
   const [showSectionNavigator, setShowSectionNavigator] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+  const [mobileTab, setMobileTab] = useState<MobileEditTab>("photos");
+  const [mobilePlacesMode, setMobilePlacesMode] = useState<MobilePlacesMode>(
+    initialSnapshot?.days.some((day) => day.stops.length > 0) ? "organize" : "add"
+  );
+  const [mobileSelectedPhotoId, setMobileSelectedPhotoId] = useState("");
+  const [showMobilePhotoDrawer, setShowMobilePhotoDrawer] = useState(false);
+  const [showMobilePlacesReview, setShowMobilePlacesReview] = useState(false);
+  const [recentImportedStops, setRecentImportedStops] = useState<string[]>([]);
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  const [photoUploadLabel, setPhotoUploadLabel] = useState("Upload trip photos");
+  const [photoUploadInputKey, setPhotoUploadInputKey] = useState(0);
+  const [showMobileEditShell, setShowMobileEditShell] = useState(false);
+  const dirtyPhotoIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!initialSnapshot) return;
+    const nextDays = toStudioDays(initialSnapshot);
+    const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+    const requestedDayId = searchParams?.get("day") ?? "";
+    const storedDayId = readLastEditedDayId(initialSnapshot.id);
+
     setTitle(initialSnapshot.title);
     setStartDate(initialSnapshot.startDate);
     setEndDate(initialSnapshot.endDate);
@@ -104,11 +126,33 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
     setRouteSummary(initialSnapshot.routeSummary);
     setCoverPhotoValue(initialSnapshot.coverPhotoValue);
     setEndingPhotoIds(initialSnapshot.endingPhotoIds);
-    setDays(toStudioDays(initialSnapshot));
+    setDays(nextDays);
     setPhotos(initialSnapshot.photos);
-    setStopDraftDayId(initialSnapshot.days[0]?.id ?? "");
-    setStopImportDayId(initialSnapshot.days[0]?.id ?? "");
-    setSelectedDayId(initialSnapshot.days[0]?.id ?? "");
+    const hasExistingStops = nextDays.some((day) => day.stops.length > 0);
+    setMobilePlacesMode(hasExistingStops ? "organize" : "add");
+    setShowMobilePlacesReview(hasExistingStops);
+    setMobileTab((current) => parseMobileEditTab(searchParams ? searchParams.get("tab") : null) ?? current ?? "photos");
+    setSelectedDayId((current) =>
+      resolvePreferredDayId(nextDays, {
+        currentDayId: current,
+        requestedDayId,
+        storedDayId
+      })
+    );
+    setStopDraftDayId((current) =>
+      resolvePreferredDayId(nextDays, {
+        currentDayId: current,
+        requestedDayId,
+        storedDayId
+      })
+    );
+    setStopImportDayId((current) =>
+      resolvePreferredDayId(nextDays, {
+        currentDayId: current,
+        requestedDayId,
+        storedDayId
+      })
+    );
   }, [initialSnapshot]);
 
   useEffect(() => {
@@ -149,7 +193,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
       return;
     }
 
-    const hasShortUrls = lines.some((l) => l.includes("goo.gl/"));
+    const hasShortUrls = lines.some((line) => isGoogleMapsShortLink(line));
 
     if (!hasShortUrls) {
       const parsed = lines.map(parseGoogleMapsLink);
@@ -246,6 +290,38 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
 
   const daysAutoSave = useAutosave(daysSaveFn, 2500);
 
+  const photosSaveFn = useCallback(async () => {
+    if (!initialSnapshot || mode !== "edit") return;
+
+    const dirtyPhotoIds = Array.from(dirtyPhotoIdsRef.current);
+    if (dirtyPhotoIds.length === 0) return;
+
+    dirtyPhotoIdsRef.current = new Set();
+
+    try {
+      for (const photoId of dirtyPhotoIds) {
+        const photo = photos.find((candidate) => candidate.id === photoId);
+        if (!photo) continue;
+
+        const response = await fetch(`/api/trips/${initialSnapshot.id}/photos/${photo.id}`, {
+          body: JSON.stringify({ alt: photo.alt, dayId: photo.dayId }),
+          headers: { "Content-Type": "application/json" },
+          method: "PATCH"
+        });
+
+        if (!response.ok) {
+          const payload = (await response.json()) as { message?: string };
+          throw new Error(payload.message ?? "Unable to save photo");
+        }
+      }
+    } catch (error) {
+      dirtyPhotoIds.forEach((photoId) => dirtyPhotoIdsRef.current.add(photoId));
+      throw error;
+    }
+  }, [initialSnapshot, mode, photos]);
+
+  const photosAutoSave = useAutosave(photosSaveFn, 1200);
+
   function updateOverviewField<T>(setter: Dispatch<SetStateAction<T>>) {
     return (value: T) => {
       setter(value);
@@ -258,16 +334,28 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
     if (mode === "edit") daysAutoSave.markDirty();
   }
 
+  function markPhotoDirty(photoId: string) {
+    dirtyPhotoIdsRef.current.add(photoId);
+    if (mode === "edit") photosAutoSave.markDirty();
+  }
+
+  function updatePhotoDraft(photoId: string, patch: Partial<TripStudioPhoto>) {
+    setPhotos((current) =>
+      current.map((photo) => (photo.id === photoId ? { ...photo, ...patch } : photo))
+    );
+    markPhotoDirty(photoId);
+  }
+
   // --- Unsaved changes warning ---
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (overviewAutoSave.dirty || daysAutoSave.dirty) {
+      if (overviewAutoSave.dirty || daysAutoSave.dirty || photosAutoSave.dirty) {
         e.preventDefault();
       }
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [overviewAutoSave.dirty, daysAutoSave.dirty]);
+  }, [overviewAutoSave.dirty, daysAutoSave.dirty, photosAutoSave.dirty]);
 
   async function handleCreateTrip() {
     if (hasInvalidDateRange(startDate, endDate)) {
@@ -420,7 +508,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
       setImportingLinks(true);
       try {
         const linksToResolve = importPreview?.expandedUrls ?? urls;
-        const hasShortUrls = urls.some((u) => u.includes("goo.gl/"));
+        const hasShortUrls = urls.some((url) => isGoogleMapsShortLink(url));
         let resolvedUrls = linksToResolve;
 
         if (hasShortUrls && !importPreview?.expandedUrls) {
@@ -465,6 +553,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
           current.map((d) => d.id === targetDayId ? { ...d, stops: [...d.stops, ...newStops] } : d)
         );
         setStopImportUrls("");
+        setRecentImportedStops(newStops.map((stop) => stop.name));
         toast.success(`${newStops.length} stop${newStops.length === 1 ? "" : "s"} added from ${resolvedCount} link${resolvedCount === 1 ? "" : "s"}`);
       } finally {
         setImportingLinks(false);
@@ -506,6 +595,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
         current.map((d) => d.id === targetDayId ? { ...d, stops: [...d.stops, ...newStops] } : d)
       );
       setStopImportUrls("");
+      setRecentImportedStops(newStops.map((stop) => stop.name));
       toast.success(`${newStops.length} stop${newStops.length === 1 ? "" : "s"} imported`);
 
       if (payload.unresolved && payload.unresolved.length > 0) {
@@ -538,6 +628,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
         current.map((d) => d.id === stopDraftDayId ? { ...d, stops: [...d.stops, newStop] } : d)
       );
       setStopDraftName("");
+      setRecentImportedStops([newStop.name]);
       toast.success(`"${newStop.name}" added`);
       return;
     }
@@ -682,19 +773,12 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
 
     setSavingBatchPhotos(true);
     try {
-      const photosToUpdate = photos.filter((p) => selectedPhotoIds.has(p.id));
-      for (const photo of photosToUpdate) {
-        await fetch(`/api/trips/${initialSnapshot.id}/photos/${photo.id}`, {
-          body: JSON.stringify({ alt: photo.alt, dayId: batchDayId }),
-          headers: { "Content-Type": "application/json" },
-          method: "PATCH"
-        });
-      }
       setPhotos((current) =>
         current.map((p) =>
           selectedPhotoIds.has(p.id) ? { ...p, dayId: batchDayId, status: "ready" as const } : p
         )
       );
+      selectedPhotoIds.forEach((photoId) => markPhotoDirty(photoId));
       toast.success(`${selectedPhotoIds.size} photo${selectedPhotoIds.size === 1 ? "" : "s"} assigned`);
       setSelectedPhotoIds(new Set());
     } catch {
@@ -704,12 +788,97 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
     }
   }
 
+  async function handleUploadPhotos(files: File[]) {
+    if (!initialSnapshot || files.length === 0) return;
+
+    setUploadingPhotos(true);
+    setPhotoUploadLabel(
+      formatTripPhotoUploadProgress({
+        current: 0,
+        phase: "preparing",
+        total: files.length
+      })
+    );
+    try {
+      const uploadResult = await uploadTripPhotosDirect({
+        days: days.map((day) => ({ date: day.date, id: day.id })),
+        files,
+        onProgress: (progress) => setPhotoUploadLabel(formatTripPhotoUploadProgress(progress)),
+        timezone,
+        tripId: initialSnapshot.id
+      });
+      const uploadedPhotos = uploadResult.assignments.uploadedPhotos ?? [];
+
+      if (uploadedPhotos.length > 0) {
+        setPhotos((current) => mergeUploadedPhotos(uploadedPhotos, current));
+        setMobileTab("photos");
+        setShowMobilePhotoDrawer(false);
+
+        const firstQueuedPhoto = uploadedPhotos.find((photo) => photo.status === "unassigned") ?? uploadedPhotos[0];
+        if (firstQueuedPhoto) {
+          setMobileSelectedPhotoId(firstQueuedPhoto.id);
+        }
+      } else {
+        router.refresh();
+      }
+
+      setPhotoUploadInputKey((current) => current + 1);
+      if (uploadResult.uploadedCount > 0) {
+        toast.success(`${uploadResult.uploadedCount} photo${uploadResult.uploadedCount === 1 ? "" : "s"} uploaded`);
+      }
+      if (uploadResult.failedCount > 0) {
+        toast.error(
+          `${uploadResult.failedCount} photo${uploadResult.failedCount === 1 ? "" : "s"} failed to upload`
+        );
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to upload photos");
+    } finally {
+      setUploadingPhotos(false);
+      setPhotoUploadLabel("Upload trip photos");
+    }
+  }
+
+  function handleUseAsTripCover(photo: TripStudioPhoto) {
+    setCoverPhotoValue(photo.storageKey);
+    if (mode === "edit") overviewAutoSave.markDirty();
+  }
+
+  function handleUseAsDayCover(photo: TripStudioPhoto, preferredDayId?: string) {
+    const targetDayId = preferredDayId || photo.dayId || selectedDayId;
+    if (!targetDayId) {
+      toast.error("Choose a day first");
+      return;
+    }
+
+    updateDayField(targetDayId, {
+      heroPhotoPreviewUrl: photo.previewUrl,
+      heroPhotoValue: photo.storageKey
+    });
+    setSelectedDayId(targetDayId);
+  }
+
+  function handleToggleEndingPhoto(photoId: string) {
+    setEndingPhotoIds((current) =>
+      current.includes(photoId)
+        ? current.filter((currentPhotoId) => currentPhotoId !== photoId)
+        : [...current, photoId]
+    );
+    if (mode === "edit") overviewAutoSave.markDirty();
+  }
+
   const saveStatusLabel = (status: string) => {
     if (status === "saving") return "Saving...";
     if (status === "saved") return "All changes saved";
     if (status === "error") return "Save failed";
     return null;
   };
+
+  const studioSaveLabel = resolveStudioSaveLabel({
+    daysAutoSave,
+    overviewAutoSave,
+    photosAutoSave
+  });
 
   useEffect(() => {
     if (days.length === 0) {
@@ -718,9 +887,25 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
     }
 
     if (!days.some((day) => day.id === selectedDayId)) {
-      setSelectedDayId(days[0]?.id ?? "");
+      setSelectedDayId((current) =>
+        resolvePreferredDayId(days, {
+          currentDayId: current,
+          requestedDayId: getQueryParam("day"),
+          storedDayId: initialSnapshot?.id ? readLastEditedDayId(initialSnapshot.id) : ""
+        })
+      );
     }
-  }, [days, selectedDayId]);
+  }, [days, initialSnapshot?.id, selectedDayId]);
+
+  useEffect(() => {
+    if (!days.some((day) => day.id === stopImportDayId)) {
+      setStopImportDayId(selectedDayId || days[0]?.id || "");
+    }
+
+    if (!days.some((day) => day.id === stopDraftDayId)) {
+      setStopDraftDayId(selectedDayId || days[0]?.id || "");
+    }
+  }, [days, selectedDayId, stopDraftDayId, stopImportDayId]);
 
   useEffect(() => {
     if (!highlightedSectionId) return;
@@ -728,6 +913,32 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
     const timeout = window.setTimeout(() => setHighlightedSectionId(null), 1400);
     return () => window.clearTimeout(timeout);
   }, [highlightedSectionId]);
+
+  useEffect(() => {
+    if (allStops.length === 0 && mobilePlacesMode === "organize") {
+      setMobilePlacesMode("add");
+      setShowMobilePlacesReview(false);
+    }
+  }, [allStops.length, mobilePlacesMode]);
+
+  useEffect(() => {
+    if (mode !== "edit" || typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      setShowMobileEditShell(false);
+      return;
+    }
+
+    const mediaQuery = window.matchMedia("(max-width: 1023px)");
+    const sync = () => setShowMobileEditShell(mediaQuery.matches);
+    sync();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", sync);
+      return () => mediaQuery.removeEventListener("change", sync);
+    }
+
+    mediaQuery.addListener(sync);
+    return () => mediaQuery.removeListener(sync);
+  }, [mode]);
 
   const selectedDay = useMemo(() => {
     if (days.length === 0) return null;
@@ -738,6 +949,56 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
     () => (selectedDay ? photos.filter((photo) => photo.dayId === selectedDay.id) : []),
     [photos, selectedDay]
   );
+
+  const unassignedPhotos = useMemo(
+    () => photos.filter((photo) => photo.status === "unassigned"),
+    [photos]
+  );
+
+  const photosMissingAltText = useMemo(
+    () => photos.filter((photo) => !photo.alt.trim()),
+    [photos]
+  );
+
+  const mobileSelectedPhoto = useMemo(
+    () => photos.find((photo) => photo.id === mobileSelectedPhotoId) ?? null,
+    [mobileSelectedPhotoId, photos]
+  );
+
+  useEffect(() => {
+    if (photos.length === 0) {
+      setMobileSelectedPhotoId("");
+      setShowMobilePhotoDrawer(false);
+      return;
+    }
+
+    const currentPhoto = photos.find((photo) => photo.id === mobileSelectedPhotoId);
+    if (!currentPhoto) {
+      setMobileSelectedPhotoId(unassignedPhotos[0]?.id ?? photos[0]?.id ?? "");
+      return;
+    }
+
+    if (mobileTab === "photos" && currentPhoto.status !== "unassigned" && unassignedPhotos.length > 0) {
+      setMobileSelectedPhotoId(unassignedPhotos[0].id);
+    }
+  }, [mobileSelectedPhotoId, mobileTab, photos, unassignedPhotos]);
+
+  useEffect(() => {
+    if (mode !== "edit" || typeof window === "undefined") return;
+
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", mobileTab);
+
+    if (selectedDayId) url.searchParams.set("day", selectedDayId);
+    else url.searchParams.delete("day");
+
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [mobileTab, mode, selectedDayId]);
+
+  useEffect(() => {
+    if (mode !== "edit" || !initialSnapshot?.id || mobileTab !== "stories" || !selectedDayId) return;
+    writeLastEditedDayId(initialSnapshot.id, selectedDayId);
+  }, [initialSnapshot?.id, mobileTab, mode, selectedDayId]);
 
   const sectionItems = useMemo(() => {
     const items: Array<{
@@ -892,7 +1153,112 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
   };
 
   return (
-    <main className="mx-auto max-w-7xl overflow-x-hidden px-3 py-5 sm:px-6 sm:py-8 lg:px-8">
+    <main className="mx-auto max-w-7xl overflow-x-hidden px-3 py-5 pb-28 sm:px-6 sm:py-8 lg:px-8 lg:pb-8">
+      {mode === "edit" && initialSnapshot && showMobileEditShell && (
+        <MobileEditShell
+          activeStopId={activeStopId}
+          activeTab={mobileTab}
+          addingStop={addingStop}
+          allStops={allStops}
+          collaborators={initialSnapshot.collaborators}
+          days={days}
+          deleteConfirmation={deleteConfirmation}
+          endDate={endDate}
+          endingPhotoIds={endingPhotoIds}
+          highlightLabel={highlightLabel}
+          importPreview={importPreview}
+          importingLinks={importingLinks}
+          isOwner={isOwner}
+          mobileSelectedPhoto={mobileSelectedPhoto}
+          mobilePlacesMode={mobilePlacesMode}
+          mobileStopsTab={mobileStopsTab}
+          pendingInviteEmail={pendingInviteEmail}
+          pendingInvites={initialSnapshot.pendingInvites}
+          photos={photos}
+          photosMissingAltText={photosMissingAltText}
+          photoUploadInputKey={photoUploadInputKey}
+          recentImportedStops={recentImportedStops}
+          routeSummary={routeSummary}
+          selectedDay={selectedDay}
+          selectedDayId={selectedDayId}
+          selectedDayPhotos={selectedDayPhotos}
+          showMobilePhotoDrawer={showMobilePhotoDrawer}
+          showMobilePlacesReview={showMobilePlacesReview}
+          startDate={startDate}
+          stopImportDayId={stopImportDayId}
+          stopImportUrls={stopImportUrls}
+          timezone={timezone}
+          title={title}
+          travelCompanions={travelCompanions}
+          tripId={initialSnapshot.id}
+          tripTitle={title || initialSnapshot.title}
+          unassignedPhotos={unassignedPhotos}
+          uploadInFlight={uploadingPhotos}
+          uploadLabel={photoUploadLabel}
+          onAddStop={handleAddStop}
+          onAssignPhotoDay={(photoId, dayId) =>
+            updatePhotoDraft(photoId, { dayId, status: dayId ? "ready" : "unassigned" })
+          }
+          onChangeInviteEmail={setPendingInviteEmail}
+          onChangeMobileTab={setMobileTab}
+          onChangePhotoAlt={(photoId, value) => updatePhotoDraft(photoId, { alt: value })}
+          onChangeSelectedDay={setSelectedDayId}
+          onDeletePhoto={async (photoId) => {
+            const response = await fetch(`/api/trips/${initialSnapshot.id}/photos/${photoId}`, { method: "DELETE" });
+            if (!response.ok) {
+              toast.error("Unable to delete photo");
+              return;
+            }
+            setPhotos((current) => current.filter((photo) => photo.id !== photoId));
+            toast.success("Photo deleted");
+          }}
+          onDeleteStop={handleDeleteStop}
+          onImportLinks={handleImportLinks}
+          onMoveStop={handleMoveStopToDay}
+          onOpenPhotoDrawer={(photoId) => {
+            setMobileSelectedPhotoId(photoId);
+            setShowMobilePhotoDrawer(true);
+          }}
+          onOpenPlacesReview={() => {
+            setMobilePlacesMode("organize");
+            setShowMobilePlacesReview(true);
+          }}
+          onPickDayCover={handleUseAsDayCover}
+          onPickEndingPhoto={handleToggleEndingPhoto}
+          onPickTripCover={handleUseAsTripCover}
+          onRenameStop={handleRenameStop}
+          onReorderDrop={handleReorderDrop}
+          onSelectPhoto={setMobileSelectedPhotoId}
+          onSetDeleteConfirmation={setDeleteConfirmation}
+          onSetEndDate={updateOverviewField(setEndDate)}
+          onSetHighlightLabel={updateOverviewField(setHighlightLabel)}
+          onSetMobilePlacesMode={(value) => {
+            setMobilePlacesMode(value);
+            setShowMobilePlacesReview(value === "organize");
+          }}
+          onSetMobileStopsTab={setMobileStopsTab}
+          onSetRouteSummary={updateOverviewField(setRouteSummary)}
+          onSetShowMobilePhotoDrawer={setShowMobilePhotoDrawer}
+          onSetStartDate={updateOverviewField(setStartDate)}
+          onSetStopDraftDayId={setStopDraftDayId}
+          onSetStopDraftName={setStopDraftName}
+          onSetStopImportDayId={setStopImportDayId}
+          onSetStopImportUrls={setStopImportUrls}
+          onSetTimezone={updateOverviewField(setTimezone)}
+          onSetTravelCompanions={updateOverviewField(setTravelCompanions)}
+          onStopClick={setActiveStopId}
+          onUploadPhotos={handleUploadPhotos}
+          onUpdateDayField={updateDayField}
+          saveLabel={studioSaveLabel}
+          stopDraftDayId={stopDraftDayId}
+          stopDraftName={stopDraftName}
+        />
+      )}
+
+      <div
+        className={cn(mode === "edit" && initialSnapshot && "hidden lg:block")}
+        hidden={mode === "edit" && initialSnapshot ? showMobileEditShell : undefined}
+      >
       {currentSection && (
         <div className="sticky top-3 z-30 mb-4 lg:hidden">
           <div className="rounded-[1.4rem] border border-ink/10 bg-paper/95 p-3 shadow-card backdrop-blur">
@@ -956,15 +1322,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
             </nav>
             {mode === "edit" && (
               <div className="rounded-xl border border-ink/10 bg-paper/80 px-3 py-2 text-xs text-ink/60 sm:rounded-[1.4rem] sm:px-4 sm:py-3">
-                {saveStatusLabel(overviewAutoSave.status) && (
-                  <p>{saveStatusLabel(overviewAutoSave.status)}</p>
-                )}
-                {saveStatusLabel(daysAutoSave.status) && (
-                  <p>{saveStatusLabel(daysAutoSave.status)}</p>
-                )}
-                {!saveStatusLabel(overviewAutoSave.status) && !saveStatusLabel(daysAutoSave.status) && (
-                  <p>Changes auto-save</p>
-                )}
+                <p>{studioSaveLabel ?? "Changes auto-save"}</p>
               </div>
             )}
           </aside>
@@ -1090,6 +1448,9 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
                 batchDayId={batchDayId}
                 setBatchDayId={setBatchDayId}
                 savingBatch={savingBatchPhotos}
+                uploadInFlight={uploadingPhotos}
+                uploadLabel={photoUploadLabel}
+                onUploadPhotos={handleUploadPhotos}
                 onBatchAssign={handleBatchAssignPhotos}
               />
             )}
@@ -1605,6 +1966,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
           </div>
         </div>
       </section>
+      </div>
       {showSectionNavigator && currentSection && (
         <SectionNavigatorDialog
           activeSectionId={activeSectionId}
@@ -1614,6 +1976,953 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
         />
       )}
     </main>
+  );
+}
+
+function MobileEditShell(props: {
+  activeStopId: string | null;
+  activeTab: MobileEditTab;
+  addingStop: boolean;
+  allStops: PlaceStop[];
+  collaborators: TripStudioSnapshot["collaborators"];
+  days: StudioDayDraft[];
+  deleteConfirmation: string;
+  endDate: string;
+  endingPhotoIds: string[];
+  highlightLabel: string;
+  importPreview: {
+    resolvedCount: number;
+    unresolvedCount: number;
+    stopNames: string[];
+    total: number;
+    expandedUrls?: string[];
+  } | null;
+  importingLinks: boolean;
+  isOwner: boolean;
+  mobileSelectedPhoto: TripStudioPhoto | null;
+  mobilePlacesMode: MobilePlacesMode;
+  mobileStopsTab: "list" | "map";
+  pendingInviteEmail: string;
+  pendingInvites: TripStudioSnapshot["pendingInvites"];
+  photoUploadInputKey: number;
+  photos: TripStudioPhoto[];
+  photosMissingAltText: TripStudioPhoto[];
+  recentImportedStops: string[];
+  routeSummary: string;
+  saveLabel: string;
+  selectedDay: StudioDayDraft | null;
+  selectedDayId: string;
+  selectedDayPhotos: TripStudioPhoto[];
+  showMobilePhotoDrawer: boolean;
+  showMobilePlacesReview: boolean;
+  startDate: string;
+  stopDraftDayId: string;
+  stopDraftName: string;
+  stopImportDayId: string;
+  stopImportUrls: string;
+  timezone: string;
+  title: string;
+  travelCompanions: string;
+  tripId: string;
+  tripTitle: string;
+  unassignedPhotos: TripStudioPhoto[];
+  uploadInFlight: boolean;
+  uploadLabel: string;
+  onAddStop: () => void;
+  onAssignPhotoDay: (photoId: string, dayId: string) => void;
+  onChangeInviteEmail: (value: string) => void;
+  onChangeMobileTab: (tab: MobileEditTab) => void;
+  onChangePhotoAlt: (photoId: string, value: string) => void;
+  onChangeSelectedDay: (dayId: string) => void;
+  onDeletePhoto: (photoId: string) => Promise<void>;
+  onDeleteStop: (dayId: string, stopId: string, name: string) => void;
+  onImportLinks: () => void;
+  onMoveStop: (fromDayId: string, stopId: string, toDayId: string) => void;
+  onOpenPhotoDrawer: (photoId: string) => void;
+  onOpenPlacesReview: () => void;
+  onPickDayCover: (photo: TripStudioPhoto, dayId?: string) => void;
+  onPickEndingPhoto: (photoId: string) => void;
+  onPickTripCover: (photo: TripStudioPhoto) => void;
+  onRenameStop: (dayId: string, stopId: string, newName: string) => void;
+  onReorderDrop: (dayId: string, event: DragEndEvent) => void;
+  onSelectPhoto: (photoId: string) => void;
+  onSetDeleteConfirmation: (value: string) => void;
+  onSetEndDate: (value: string) => void;
+  onSetHighlightLabel: (value: string) => void;
+  onSetMobilePlacesMode: (value: MobilePlacesMode) => void;
+  onSetMobileStopsTab: (value: "list" | "map") => void;
+  onSetRouteSummary: (value: string) => void;
+  onSetShowMobilePhotoDrawer: (value: boolean) => void;
+  onSetStartDate: (value: string) => void;
+  onSetStopDraftDayId: (value: string) => void;
+  onSetStopDraftName: (value: string) => void;
+  onSetStopImportDayId: (value: string) => void;
+  onSetStopImportUrls: (value: string) => void;
+  onSetTimezone: (value: string) => void;
+  onSetTravelCompanions: (value: string) => void;
+  onStopClick: (stopId: string) => void;
+  onUploadPhotos: (files: File[]) => Promise<void>;
+  onUpdateDayField: (dayId: string, patch: Partial<StudioDayDraft>) => void;
+}) {
+  const [mobileInviting, setMobileInviting] = useState(false);
+  const [mobileInviteUrl, setMobileInviteUrl] = useState<string | null>(null);
+  const [mobileInviteExpiresAt, setMobileInviteExpiresAt] = useState<string | null>(null);
+  const [localPendingInvites, setLocalPendingInvites] = useState(props.pendingInvites);
+  const [localCollaborators, setLocalCollaborators] = useState(props.collaborators);
+
+  useEffect(() => {
+    setLocalPendingInvites(props.pendingInvites);
+  }, [props.pendingInvites]);
+
+  useEffect(() => {
+    setLocalCollaborators(props.collaborators);
+  }, [props.collaborators]);
+
+  const queuePhoto =
+    props.unassignedPhotos.find((photo) => photo.id === props.mobileSelectedPhoto?.id) ??
+    props.unassignedPhotos[0] ??
+    props.mobileSelectedPhoto;
+
+  return (
+    <section className="lg:hidden" data-testid="mobile-edit-shell">
+      <div className="sticky top-3 z-30 rounded-[1.8rem] border border-ink/10 bg-paper/95 px-4 py-3 shadow-card backdrop-blur">
+        <div className="flex items-center justify-between gap-3">
+          <a
+            className="rounded-full border border-ink/10 bg-paper/80 px-3 py-2 text-xs uppercase tracking-[0.2em] text-ink/72"
+            href={`/trips/${props.tripId}`}
+          >
+            Back
+          </a>
+          <div className="min-w-0 text-center">
+            <p className="truncate font-display text-2xl text-ink">{props.tripTitle}</p>
+            <p className="font-mono text-[0.62rem] uppercase tracking-[0.28em] text-olive">{props.saveLabel}</p>
+          </div>
+          <div className="w-[3.75rem]" />
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-[2.2rem] border border-ink/10 bg-paper/92 px-4 pb-6 pt-5 shadow-float">
+        <div className="grid gap-5">
+          <div
+            aria-label="Edit workspace"
+            className="grid grid-cols-4 gap-2 rounded-[1.8rem] border border-ink/10 bg-mist/80 p-2"
+            role="tablist"
+          >
+            {([
+              ["photos", "Photos"],
+              ["places", "Places"],
+              ["stories", "Stories"],
+              ["more", "More"]
+            ] as const).map(([tabId, label]) => (
+              <button
+                key={tabId}
+                aria-controls={`mobile-panel-${tabId}`}
+                aria-selected={props.activeTab === tabId}
+                className={cn(
+                  "rounded-[1.2rem] px-3 py-3 text-xs font-semibold uppercase tracking-[0.2em] transition",
+                  props.activeTab === tabId
+                    ? "bg-ink text-paper shadow-sm"
+                    : "bg-paper/70 text-ink/66"
+                )}
+                id={`mobile-tab-${tabId}`}
+                onClick={() => props.onChangeMobileTab(tabId)}
+                role="tab"
+                type="button"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div
+            aria-labelledby="mobile-tab-photos"
+            hidden={props.activeTab !== "photos"}
+            id="mobile-panel-photos"
+            role="tabpanel"
+          >
+            <div className="grid gap-4">
+              <div className="overflow-hidden rounded-[1.8rem] border border-olive/20 bg-[linear-gradient(180deg,rgba(102,115,90,0.12),rgba(246,241,231,0.96))] p-5">
+                <p className="font-mono text-[0.68rem] uppercase tracking-[0.32em] text-olive">Photo workspace</p>
+                <p className="mt-3 font-display text-[2rem] leading-none text-ink">Upload photos to today&apos;s field notes</p>
+                <p className="mt-3 text-sm leading-7 text-ink/70">
+                  Drop fresh frames in first. Then assign them to the right day, set covers, and pick the ending strip.
+                </p>
+                <div className="mt-5 grid grid-cols-2 gap-3">
+                  <label className="grid gap-2 rounded-[1.4rem] border-2 border-ink bg-paper/88 px-4 py-4 text-left shadow-sm">
+                    <span className="font-medium text-ink">From library</span>
+                    <span className="text-xs uppercase tracking-[0.18em] text-ink/52">Choose batch</span>
+                    <input
+                      key={`library-${props.photoUploadInputKey}`}
+                      accept="image/*"
+                      aria-label="From library"
+                      className="sr-only"
+                      disabled={props.uploadInFlight}
+                      multiple
+                      onChange={(event) => {
+                        const files = Array.from(event.target.files ?? []);
+                        if (files.length > 0) void props.onUploadPhotos(files);
+                      }}
+                      type="file"
+                    />
+                  </label>
+                  <label className="grid gap-2 rounded-[1.4rem] border border-ink/10 bg-ink px-4 py-4 text-left text-paper shadow-sm">
+                    <span className="font-medium">Take photo</span>
+                    <span className="text-xs uppercase tracking-[0.18em] text-paper/72">Open camera</span>
+                    <input
+                      key={`camera-${props.photoUploadInputKey}`}
+                      accept="image/*"
+                      aria-label="Take photo"
+                      capture="environment"
+                      className="sr-only"
+                      disabled={props.uploadInFlight}
+                      multiple
+                      onChange={(event) => {
+                        const files = Array.from(event.target.files ?? []);
+                        if (files.length > 0) void props.onUploadPhotos(files);
+                      }}
+                      type="file"
+                    />
+                  </label>
+                </div>
+                <p className="mt-4 text-xs uppercase tracking-[0.18em] text-ink/58">
+                  {props.uploadInFlight ? props.uploadLabel : `Upload up to ${MAX_TRIP_PHOTO_UPLOADS} photos per batch`}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <span className="rounded-full border border-ink/10 bg-sand/35 px-3 py-1.5 text-xs uppercase tracking-[0.16em] text-ink/70">
+                  {props.unassignedPhotos.length} unassigned
+                </span>
+                <span className="rounded-full border border-ink/10 bg-paper px-3 py-1.5 text-xs uppercase tracking-[0.16em] text-ink/70">
+                  {props.photosMissingAltText.length} need alt text
+                </span>
+                <span className="rounded-full border border-ink/10 bg-paper px-3 py-1.5 text-xs uppercase tracking-[0.16em] text-ink/70">
+                  {props.endingPhotoIds.length} ending picks
+                </span>
+              </div>
+
+              {queuePhoto ? (
+                <div className="rounded-[1.8rem] border border-ink/10 bg-sand/25 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-mono text-[0.68rem] uppercase tracking-[0.32em] text-olive">Assign queue</p>
+                      <p className="mt-2 text-sm leading-6 text-ink/65">
+                        {props.unassignedPhotos.length > 0
+                          ? "Focus one photo at a time until the queue is clear."
+                          : "All photos are assigned. You can still promote covers or update the ending strip here."}
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-ink/10 bg-paper px-3 py-1 text-xs uppercase tracking-[0.16em] text-ink/60">
+                      {queuePhoto.status}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 overflow-hidden rounded-[1.5rem] border border-paper/50 bg-paper shadow-sm">
+                    <img
+                      alt={queuePhoto.alt || queuePhoto.originalFilename}
+                      className="h-64 w-full object-cover"
+                      src={queuePhoto.previewUrl}
+                    />
+                    <div className="grid gap-3 p-4">
+                      <div>
+                        <p className="font-display text-2xl text-ink">{queuePhoto.originalFilename}</p>
+                        <p className="mt-1 text-sm text-ink/58">
+                          {queuePhoto.dayId ? "Already linked to a day" : "Needs a day before it appears in story galleries."}
+                        </p>
+                      </div>
+                      <label className="grid gap-2 text-sm text-ink/70">
+                        <span className="font-mono text-[0.68rem] uppercase tracking-[0.24em] text-olive">Assign photo to day</span>
+                        <select
+                          aria-label="Assign photo to day"
+                          className="h-12 rounded-[1.2rem] border border-ink/10 bg-paper px-4 text-base text-ink outline-none"
+                          onChange={(event) => props.onAssignPhotoDay(queuePhoto.id, event.target.value)}
+                          value={queuePhoto.dayId}
+                        >
+                          <option value="">Unassigned</option>
+                          {props.days.map((day) => (
+                            <option key={day.id} value={day.id}>
+                              Day {day.dayIndex} · {day.title || day.date}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="grid gap-2 text-sm text-ink/70">
+                        <span className="font-mono text-[0.68rem] uppercase tracking-[0.24em] text-olive">Alt text</span>
+                        <input
+                          className="h-12 rounded-[1.2rem] border border-ink/10 bg-paper px-4 text-base text-ink outline-none transition focus:border-olive/45"
+                          onChange={(event) => props.onChangePhotoAlt(queuePhoto.id, event.target.value)}
+                          value={queuePhoto.alt}
+                        />
+                      </label>
+                      <div className="grid grid-cols-3 gap-2 text-xs uppercase tracking-[0.16em]">
+                        <button
+                          className="rounded-[1rem] border border-ink/10 bg-paper px-3 py-3 text-ink/72"
+                          onClick={() => props.onPickTripCover(queuePhoto)}
+                          type="button"
+                        >
+                          Trip cover
+                        </button>
+                        <button
+                          className="rounded-[1rem] border border-ink/10 bg-paper px-3 py-3 text-ink/72"
+                          onClick={() => props.onPickDayCover(queuePhoto)}
+                          type="button"
+                        >
+                          Day cover
+                        </button>
+                        <button
+                          className={cn(
+                            "rounded-[1rem] border px-3 py-3",
+                            props.endingPhotoIds.includes(queuePhoto.id)
+                              ? "border-terracotta/30 bg-terracotta/10 text-terracotta"
+                              : "border-ink/10 bg-paper text-ink/72"
+                          )}
+                          onClick={() => props.onPickEndingPhoto(queuePhoto.id)}
+                          type="button"
+                        >
+                          {props.endingPhotoIds.includes(queuePhoto.id) ? "Ending pick" : "Add ending"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-[1.6rem] border border-ink/10 bg-sand/20 px-4 py-5 text-sm leading-7 text-ink/62">
+                  No photos yet. Start from the upload card above to build the day galleries.
+                </div>
+              )}
+
+              {props.photos.length > 0 && (
+                <div className="grid gap-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-mono text-[0.68rem] uppercase tracking-[0.3em] text-olive">Library</p>
+                      <p className="mt-1 text-sm text-ink/58">Tap any photo to open the detail drawer.</p>
+                    </div>
+                    <span className="rounded-full border border-ink/10 bg-paper px-3 py-1 text-xs uppercase tracking-[0.16em] text-ink/60">
+                      {props.photos.length} total
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    {props.photos.map((photo) => (
+                      <button
+                        key={photo.id}
+                        className="overflow-hidden rounded-[1.2rem] border border-ink/10 bg-paper text-left"
+                        onClick={() => props.onOpenPhotoDrawer(photo.id)}
+                        type="button"
+                      >
+                        <div className="relative">
+                          <img
+                            alt={photo.alt || photo.originalFilename}
+                            className="aspect-square w-full object-cover"
+                            src={photo.previewUrl}
+                          />
+                          <span
+                            className={cn(
+                              "absolute left-2 top-2 rounded-full px-2 py-1 text-[0.58rem] uppercase tracking-[0.14em]",
+                              photo.status === "ready" ? "bg-olive text-paper" : "bg-terracotta text-paper"
+                            )}
+                          >
+                            {photo.status}
+                          </span>
+                        </div>
+                        <p className="truncate px-2 py-2 text-[0.72rem] text-ink/68">{photo.originalFilename}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div
+            aria-labelledby="mobile-tab-places"
+            hidden={props.activeTab !== "places"}
+            id="mobile-panel-places"
+            role="tabpanel"
+          >
+            <div className="grid gap-4">
+              <div className="overflow-hidden rounded-[1.8rem] border border-ink/10 bg-[linear-gradient(180deg,rgba(221,209,191,0.55),rgba(246,241,231,0.95))] p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-mono text-[0.68rem] uppercase tracking-[0.32em] text-olive">Places workflow</p>
+                    <p className="mt-3 font-display text-[1.85rem] leading-none text-ink">
+                      {props.mobilePlacesMode === "organize" ? "Shape the route" : "Get places in fast"}
+                    </p>
+                    <p className="mt-3 text-sm leading-7 text-ink/68">
+                      {props.mobilePlacesMode === "organize"
+                        ? "Reorder stops, switch days, and clean up the route."
+                        : "Paste Google Maps links or add one stop manually while you are still moving."}
+                    </p>
+                  </div>
+                  <div className="shrink-0 rounded-full border border-ink/10 bg-paper px-3 py-1 text-xs uppercase tracking-[0.16em] text-ink/62">
+                    {props.allStops.length} stop{props.allStops.length === 1 ? "" : "s"}
+                  </div>
+                </div>
+
+                <div className="mt-5 grid grid-cols-2 gap-2 rounded-[1.4rem] border border-ink/10 bg-paper/78 p-2">
+                  <button
+                    aria-pressed={props.mobilePlacesMode === "add"}
+                    className={cn(
+                      "rounded-[1rem] px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] transition",
+                      props.mobilePlacesMode === "add" ? "bg-ink text-paper shadow-sm" : "text-ink/64"
+                    )}
+                    onClick={() => props.onSetMobilePlacesMode("add")}
+                    type="button"
+                  >
+                    Add
+                  </button>
+                  <button
+                    aria-pressed={props.mobilePlacesMode === "organize"}
+                    className={cn(
+                      "rounded-[1rem] px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] transition disabled:opacity-45",
+                      props.mobilePlacesMode === "organize" ? "bg-ink text-paper shadow-sm" : "text-ink/64"
+                    )}
+                    disabled={props.allStops.length === 0}
+                    onClick={() => props.onSetMobilePlacesMode("organize")}
+                    type="button"
+                  >
+                    Organize
+                  </button>
+                </div>
+              </div>
+
+              {props.mobilePlacesMode === "add" && (
+                <>
+                  <div className="rounded-[1.8rem] border border-ink/10 bg-sand/25 p-4">
+                    <p className="font-mono text-[0.68rem] uppercase tracking-[0.32em] text-olive">Paste route links</p>
+                    <label className="mt-4 grid gap-2 text-sm text-ink/75">
+                      <span className="font-mono text-[0.68rem] uppercase tracking-[0.24em] text-olive">Add places to day</span>
+                      <select
+                        aria-label="Add places to day"
+                        className="h-12 rounded-[1.2rem] border border-ink/10 bg-paper px-4 text-base text-ink outline-none"
+                        onChange={(event) => {
+                          props.onSetStopImportDayId(event.target.value);
+                          props.onChangeSelectedDay(event.target.value);
+                        }}
+                        value={props.stopImportDayId}
+                      >
+                        <option value="">Choose a day</option>
+                        {props.days.map((day) => (
+                          <option key={day.id} value={day.id}>
+                            Day {day.dayIndex} · {day.title || day.date}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <textarea
+                      className="mt-3 min-h-36 w-full rounded-[1.4rem] border border-ink/10 bg-paper px-4 py-4 text-base leading-7 text-ink outline-none transition focus:border-olive/45"
+                      onChange={(event) => props.onSetStopImportUrls(event.target.value)}
+                      placeholder={"Paste one Google Maps place or route link per line"}
+                      value={props.stopImportUrls}
+                    />
+                    {props.importPreview && (
+                      <div className="mt-3 rounded-[1rem] border border-ink/10 bg-paper px-3 py-3 text-sm text-ink/68">
+                        <p>
+                          {props.importPreview.stopNames.length} stop{props.importPreview.stopNames.length === 1 ? "" : "s"} found
+                          {props.importPreview.unresolvedCount > 0 ? ` · ${props.importPreview.unresolvedCount} unresolved` : ""}
+                        </p>
+                        {props.importPreview.stopNames.length > 0 && (
+                          <p className="mt-2 text-xs text-ink/54">{props.importPreview.stopNames.join(" · ")}</p>
+                        )}
+                      </div>
+                    )}
+                    <button
+                      className="mt-4 w-full rounded-full bg-ink px-5 py-3 text-sm uppercase tracking-[0.22em] text-paper disabled:opacity-55"
+                      disabled={props.importingLinks || !props.stopImportUrls.trim() || !props.stopImportDayId}
+                      onClick={props.onImportLinks}
+                      type="button"
+                    >
+                      {props.importingLinks ? "Importing..." : "Import links"}
+                    </button>
+                  </div>
+
+                  <div className="rounded-[1.6rem] border border-ink/10 bg-paper p-4">
+                    <p className="font-mono text-[0.68rem] uppercase tracking-[0.28em] text-olive">Manual stop</p>
+                    <div className="mt-3 grid gap-3">
+                      <select
+                        className="h-12 rounded-[1.2rem] border border-ink/10 bg-paper px-4 text-base text-ink outline-none"
+                        onChange={(event) => {
+                          props.onSetStopDraftDayId(event.target.value);
+                          props.onChangeSelectedDay(event.target.value);
+                        }}
+                        value={props.stopDraftDayId}
+                      >
+                        <option value="">Choose a day</option>
+                        {props.days.map((day) => (
+                          <option key={day.id} value={day.id}>
+                            Day {day.dayIndex} · {day.title || day.date}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        className="h-12 rounded-[1.2rem] border border-ink/10 bg-paper px-4 text-base text-ink outline-none transition focus:border-olive/45"
+                        onChange={(event) => props.onSetStopDraftName(event.target.value)}
+                        placeholder="Stop name"
+                        value={props.stopDraftName}
+                      />
+                      <button
+                        className="rounded-full border border-ink/10 px-5 py-3 text-sm uppercase tracking-[0.22em] text-ink disabled:opacity-55"
+                        disabled={props.addingStop || !props.stopDraftName.trim() || !props.stopDraftDayId}
+                        onClick={props.onAddStop}
+                        type="button"
+                      >
+                        {props.addingStop ? "Adding..." : "Add stop"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {props.recentImportedStops.length > 0 && (
+                    <div className="rounded-[1.6rem] border border-ink/10 bg-paper p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="font-mono text-[0.68rem] uppercase tracking-[0.28em] text-olive">Imported stops</p>
+                          <p className="mt-1 text-sm text-ink/58">Latest additions are ready. Switch to organize when you want to refine the route.</p>
+                        </div>
+                        <button
+                          className="rounded-full border border-ink/10 px-4 py-2 text-xs uppercase tracking-[0.16em] text-ink/70"
+                          onClick={props.onOpenPlacesReview}
+                          type="button"
+                        >
+                          Organize now
+                        </button>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {props.recentImportedStops.map((stopName) => (
+                          <span
+                            key={stopName}
+                            className="rounded-full border border-ink/10 bg-sand/25 px-3 py-1.5 text-xs text-ink/70"
+                          >
+                            {stopName}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {props.mobilePlacesMode === "organize" && props.showMobilePlacesReview && (
+                <div className="grid gap-4 rounded-[1.8rem] border border-ink/10 bg-paper p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-mono text-[0.68rem] uppercase tracking-[0.28em] text-olive">Route organizer</p>
+                      <p className="mt-1 text-sm text-ink/58">Refine order, move stops between days, or switch to the map.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        className={cn(
+                          "rounded-full px-3 py-2 text-xs uppercase tracking-[0.16em]",
+                          props.mobileStopsTab === "list" ? "bg-ink text-paper" : "border border-ink/10 text-ink/70"
+                        )}
+                        onClick={() => props.onSetMobileStopsTab("list")}
+                        type="button"
+                      >
+                        List
+                      </button>
+                      <button
+                        className={cn(
+                          "rounded-full px-3 py-2 text-xs uppercase tracking-[0.16em]",
+                          props.mobileStopsTab === "map" ? "bg-ink text-paper" : "border border-ink/10 text-ink/70"
+                        )}
+                        onClick={() => props.onSetMobileStopsTab("map")}
+                        type="button"
+                      >
+                        Map
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {props.days.map((day) => (
+                      <button
+                        key={day.id}
+                        aria-pressed={props.selectedDayId === day.id}
+                        className={cn(
+                          "shrink-0 rounded-full border px-4 py-2 text-xs uppercase tracking-[0.16em]",
+                          props.selectedDayId === day.id ? "border-olive/25 bg-olive/10 text-ink" : "border-ink/10 text-ink/62"
+                        )}
+                        onClick={() => props.onChangeSelectedDay(day.id)}
+                        type="button"
+                      >
+                        Day {day.dayIndex}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="rounded-[1.2rem] border border-ink/10 bg-sand/25 px-4 py-3 text-sm leading-6 text-ink/64">
+                    Drag stops by the grip handle to reorder this day. Use the move menu if a stop belongs on another day.
+                  </div>
+                  {props.mobileStopsTab === "list" && props.selectedDay && (
+                    <DayStopList
+                      activeStopId={props.activeStopId}
+                      allDays={props.days}
+                      day={props.selectedDay}
+                      mode="edit"
+                      onDeleteStop={props.onDeleteStop}
+                      onMoveStop={props.onMoveStop}
+                      onRenameStop={props.onRenameStop}
+                      onReorderDrop={props.onReorderDrop}
+                      onStopClick={props.onStopClick}
+                    />
+                  )}
+                  {props.mobileStopsTab === "map" && (
+                    <RouteEditorMap
+                      activeStopId={props.activeStopId}
+                      onMarkerClick={props.onStopClick}
+                      stops={props.allStops}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div
+            aria-labelledby="mobile-tab-stories"
+            hidden={props.activeTab !== "stories"}
+            id="mobile-panel-stories"
+            role="tabpanel"
+          >
+            <div className="grid gap-4">
+              <div>
+                <p className="font-mono text-[0.68rem] uppercase tracking-[0.32em] text-olive">Story journal</p>
+                <p className="mt-3 font-display text-[1.9rem] leading-none text-ink">Write one day at a time</p>
+              </div>
+
+              <div className="flex gap-3 overflow-x-auto pb-1">
+                {props.days.map((day) => {
+                  const dayPhotosCount = props.photos.filter((photo) => photo.dayId === day.id).length;
+                  const completed = isDayStoryComplete(day);
+
+                  return (
+                    <button
+                      key={day.id}
+                      className={cn(
+                        "grid min-w-[9rem] gap-2 rounded-[1.4rem] border px-4 py-3 text-left",
+                        props.selectedDayId === day.id
+                          ? "border-olive/25 bg-olive/10"
+                          : "border-ink/10 bg-paper"
+                      )}
+                      onClick={() => props.onChangeSelectedDay(day.id)}
+                      type="button"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-[0.62rem] uppercase tracking-[0.18em] text-olive">Day {day.dayIndex}</span>
+                        <span className={cn("h-2.5 w-2.5 rounded-full", completed ? "bg-olive" : "bg-sand")} />
+                      </div>
+                      <p className="truncate text-sm font-medium text-ink">{day.title || day.cityLabel || day.date}</p>
+                      <p className="text-xs text-ink/55">{dayPhotosCount} photo{dayPhotosCount === 1 ? "" : "s"} · {day.stops.length} stop{day.stops.length === 1 ? "" : "s"}</p>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {props.selectedDay && (
+                <>
+                  <article className="rounded-[1.8rem] border border-ink/10 bg-sand/20 p-4">
+                    <p className="font-mono text-[0.68rem] uppercase tracking-[0.28em] text-olive">Day preview</p>
+                    <div className="mt-3 flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-display text-2xl text-ink">Day {props.selectedDay.dayIndex}</p>
+                        <p className="mt-1 text-sm text-ink/58">
+                          {props.selectedDay.cityLabel || "City"} · {formatDisplayDate(props.selectedDay.date)}
+                        </p>
+                      </div>
+                      <span className="rounded-full border border-ink/10 bg-paper px-3 py-1 text-xs uppercase tracking-[0.16em] text-ink/58">
+                        {props.selectedDayPhotos.length} photo{props.selectedDayPhotos.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <p className="mt-4 font-display text-xl text-ink">{props.selectedDay.title || "Give this day a title"}</p>
+                    <p className="mt-2 text-sm leading-7 text-ink/66">
+                      {props.selectedDay.summary || "Add the one-line summary that anchors the public story card."}
+                    </p>
+                  </article>
+
+                  <div className="grid gap-4">
+                    <StudioField
+                      label="City"
+                      onChange={(value) => props.onUpdateDayField(props.selectedDay!.id, { cityLabel: value })}
+                      value={props.selectedDay.cityLabel}
+                    />
+                    <StudioField
+                      label="Story title"
+                      onChange={(value) => props.onUpdateDayField(props.selectedDay!.id, { title: value })}
+                      value={props.selectedDay.title}
+                    />
+                    <StudioTextArea
+                      description="Short summary under the day title."
+                      label="Story summary"
+                      onChange={(value) => props.onUpdateDayField(props.selectedDay!.id, { summary: value })}
+                      value={props.selectedDay.summary}
+                    />
+                    <StudioField
+                      label="Best moment"
+                      onChange={(value) => props.onUpdateDayField(props.selectedDay!.id, { highlightMoment: value })}
+                      value={props.selectedDay.highlightMoment}
+                    />
+                    <StudioTextArea
+                      description="Long-form journal body."
+                      label="Journal"
+                      onChange={(value) => props.onUpdateDayField(props.selectedDay!.id, { journal: value })}
+                      value={props.selectedDay.journal}
+                    />
+                  </div>
+
+                  {props.selectedDayPhotos.length > 0 && (
+                    <div className="grid gap-3">
+                      <div>
+                        <p className="font-mono text-[0.68rem] uppercase tracking-[0.28em] text-olive">Use photo from this day</p>
+                        <p className="mt-1 text-sm text-ink/58">Promote one of today&apos;s frames as the cover art.</p>
+                      </div>
+                      <div className="grid grid-cols-4 gap-3">
+                        {props.selectedDayPhotos.map((photo) => (
+                          <button
+                            key={photo.id}
+                            className="overflow-hidden rounded-[1rem] border border-ink/10 bg-paper"
+                            onClick={() => props.onPickDayCover(photo, props.selectedDay!.id)}
+                            type="button"
+                          >
+                            <img
+                              alt={photo.alt || photo.originalFilename}
+                              className="aspect-square w-full object-cover"
+                              src={photo.previewUrl}
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          <div
+            aria-labelledby="mobile-tab-more"
+            hidden={props.activeTab !== "more"}
+            id="mobile-panel-more"
+            role="tabpanel"
+          >
+            <div className="grid gap-4">
+              <div>
+                <p className="font-mono text-[0.68rem] uppercase tracking-[0.32em] text-olive">Trip settings</p>
+                <p className="mt-3 font-display text-[1.9rem] leading-none text-ink">Low-frequency edits live here</p>
+              </div>
+
+              <div className="rounded-[1.8rem] border border-ink/10 bg-paper p-4">
+                <p className="font-mono text-[0.68rem] uppercase tracking-[0.28em] text-olive">Trip facts</p>
+                <div className="mt-4 grid gap-4">
+                  <StudioField label="Timezone" onChange={props.onSetTimezone} value={props.timezone} />
+                  <StudioField label="Travel companions" onChange={props.onSetTravelCompanions} value={props.travelCompanions} />
+                  <StudioField label="Start date" onChange={props.onSetStartDate} type="date" value={props.startDate} />
+                  <StudioField label="End date" onChange={props.onSetEndDate} type="date" value={props.endDate} />
+                  <StudioField label="Route" onChange={props.onSetRouteSummary} value={props.routeSummary} />
+                  <StudioField label="Mood" onChange={props.onSetHighlightLabel} value={props.highlightLabel} />
+                </div>
+              </div>
+
+              {props.isOwner && (
+                <div className="rounded-[1.8rem] border border-ink/10 bg-paper p-4">
+                  <p className="font-mono text-[0.68rem] uppercase tracking-[0.28em] text-olive">Invite editors</p>
+                  <div className="mt-4 flex gap-3">
+                    <input
+                      className="h-12 flex-1 rounded-[1.2rem] border border-ink/10 bg-sand/20 px-4 text-base text-ink outline-none"
+                      onChange={(event) => props.onChangeInviteEmail(event.target.value)}
+                      placeholder="co-editor@email.com"
+                      value={props.pendingInviteEmail}
+                    />
+                    <button
+                      className="rounded-[1.2rem] bg-ink px-4 text-xs uppercase tracking-[0.18em] text-paper disabled:opacity-55"
+                      disabled={mobileInviting || !props.pendingInviteEmail.trim()}
+                      onClick={async () => {
+                        setMobileInviting(true);
+                        try {
+                          const response = await fetch(`/api/trips/${props.tripId}/collaborators`, {
+                            body: JSON.stringify({ email: props.pendingInviteEmail }),
+                            headers: { "Content-Type": "application/json" },
+                            method: "POST"
+                          });
+                          const payload = (await response.json()) as {
+                            email?: string;
+                            expiresAt?: string;
+                            inviteId?: string;
+                            inviteUrl?: string;
+                            message?: string;
+                          };
+
+                          if (!response.ok) {
+                            toast.error(payload.message ?? "Unable to invite collaborator");
+                            return;
+                          }
+
+                          if (payload.inviteId && payload.expiresAt) {
+                            const inviteId = payload.inviteId;
+                            const expiresAt = payload.expiresAt;
+                            const inviteEmail = payload.email ?? props.pendingInviteEmail.trim().toLowerCase();
+
+                            setLocalPendingInvites((current) => [
+                              {
+                                createdAt: new Date().toISOString(),
+                                email: inviteEmail,
+                                expiresAt,
+                                inviteId,
+                                role: "editor"
+                              },
+                              ...current.filter((invite) => invite.inviteId !== inviteId)
+                            ]);
+                          }
+
+                          props.onChangeInviteEmail("");
+                          setMobileInviteUrl(payload.inviteUrl ?? null);
+                          setMobileInviteExpiresAt(payload.expiresAt ?? null);
+                          toast.success("Invite sent");
+                        } finally {
+                          setMobileInviting(false);
+                        }
+                      }}
+                      type="button"
+                    >
+                      {mobileInviting ? "Inviting..." : "Invite"}
+                    </button>
+                  </div>
+                  {mobileInviteUrl && (
+                    <div className="mt-3 rounded-[1rem] border border-ink/10 bg-sand/20 p-3 text-sm text-ink/70">
+                      <p className="break-all">{mobileInviteUrl}</p>
+                      {mobileInviteExpiresAt && <p className="mt-2 text-xs text-ink/52">Expires {new Date(mobileInviteExpiresAt).toLocaleString()}</p>}
+                    </div>
+                  )}
+                  <div className="mt-4 grid gap-2">
+                    {localCollaborators.map((collaborator) => (
+                      <div key={collaborator.email} className="rounded-[1rem] border border-ink/10 bg-sand/20 px-3 py-3 text-sm text-ink/70">
+                        {collaborator.email} · {collaborator.role}
+                      </div>
+                    ))}
+                    {localPendingInvites.map((invite) => (
+                      <div key={invite.inviteId} className="rounded-[1rem] border border-ink/10 bg-paper px-3 py-3 text-sm text-ink/70">
+                        {invite.email} · pending until {new Date(invite.expiresAt).toLocaleDateString()}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {props.isOwner && (
+                <div className="rounded-[1.8rem] border border-terracotta/20 bg-terracotta/10 p-4">
+                  <p className="font-mono text-[0.68rem] uppercase tracking-[0.28em] text-terracotta">Danger zone</p>
+                  <p className="mt-3 text-sm leading-7 text-ink/70">
+                    Type the trip title to unlock permanent deletion.
+                  </p>
+                  <div className="mt-4 grid gap-3">
+                    <input
+                      className="h-12 rounded-[1.2rem] border border-terracotta/25 bg-paper px-4 text-base text-ink outline-none"
+                      onChange={(event) => props.onSetDeleteConfirmation(event.target.value)}
+                      placeholder={`Type "${props.tripTitle}" to confirm`}
+                      value={props.deleteConfirmation}
+                    />
+                    <button
+                      className="rounded-[1.2rem] bg-terracotta px-4 py-3 text-xs uppercase tracking-[0.18em] text-paper disabled:opacity-55"
+                      disabled={props.deleteConfirmation !== props.tripTitle}
+                      onClick={async () => {
+                        const response = await fetch(`/api/trips/${props.tripId}`, { method: "DELETE" });
+                        const payload = (await response.json()) as { message?: string };
+                        if (!response.ok) {
+                          toast.error(payload.message ?? "Unable to delete trip");
+                          return;
+                        }
+                        toast.success("Trip deleted");
+                        window.location.assign("/");
+                      }}
+                      type="button"
+                    >
+                      Delete trip
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {props.showMobilePhotoDrawer && props.mobileSelectedPhoto && (
+        <div className="fixed inset-0 z-40 flex items-end bg-ink/30 px-3 pb-24 pt-12">
+          <div className="w-full rounded-[2rem] border border-ink/10 bg-paper p-4 shadow-float">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-mono text-[0.68rem] uppercase tracking-[0.28em] text-olive">Photo detail</p>
+                <p className="mt-2 font-display text-2xl text-ink">{props.mobileSelectedPhoto.originalFilename}</p>
+              </div>
+              <button
+                className="rounded-full border border-ink/10 px-4 py-2 text-xs uppercase tracking-[0.16em] text-ink/70"
+                onClick={() => props.onSetShowMobilePhotoDrawer(false)}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+            <img
+              alt={props.mobileSelectedPhoto.alt || props.mobileSelectedPhoto.originalFilename}
+              className="mt-4 h-64 w-full rounded-[1.2rem] object-cover"
+              src={props.mobileSelectedPhoto.previewUrl}
+            />
+            <div className="mt-4 grid gap-3">
+              <StudioField
+                label="Alt text"
+                onChange={(value) => props.onChangePhotoAlt(props.mobileSelectedPhoto!.id, value)}
+                value={props.mobileSelectedPhoto.alt}
+              />
+              <label className="grid gap-2 text-sm text-ink/75">
+                <span className="font-mono text-[0.68rem] uppercase tracking-[0.24em] text-olive">Assign photo to day</span>
+                <select
+                  aria-label="Assign photo to day"
+                  className="h-12 rounded-[1.2rem] border border-ink/10 bg-paper px-4 text-base text-ink outline-none"
+                  onChange={(event) => props.onAssignPhotoDay(props.mobileSelectedPhoto!.id, event.target.value)}
+                  value={props.mobileSelectedPhoto.dayId}
+                >
+                  <option value="">Unassigned</option>
+                  {props.days.map((day) => (
+                    <option key={day.id} value={day.id}>
+                      Day {day.dayIndex} · {day.title || day.date}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  className="rounded-[1rem] border border-ink/10 px-3 py-3 text-xs uppercase tracking-[0.16em] text-ink/72"
+                  onClick={() => props.onPickTripCover(props.mobileSelectedPhoto!)}
+                  type="button"
+                >
+                  Set trip cover
+                </button>
+                <button
+                  className="rounded-[1rem] border border-ink/10 px-3 py-3 text-xs uppercase tracking-[0.16em] text-ink/72"
+                  onClick={() => props.onPickDayCover(props.mobileSelectedPhoto!)}
+                  type="button"
+                >
+                  Set day cover
+                </button>
+                <button
+                  className="rounded-[1rem] border border-ink/10 px-3 py-3 text-xs uppercase tracking-[0.16em] text-ink/72"
+                  onClick={() => props.onPickEndingPhoto(props.mobileSelectedPhoto!.id)}
+                  type="button"
+                >
+                  {props.endingPhotoIds.includes(props.mobileSelectedPhoto.id) ? "Remove ending" : "Add ending"}
+                </button>
+                <button
+                  className="rounded-[1rem] border border-terracotta/20 px-3 py-3 text-xs uppercase tracking-[0.16em] text-terracotta"
+                  onClick={async () => {
+                    await props.onDeletePhoto(props.mobileSelectedPhoto!.id);
+                    props.onSetShowMobilePhotoDrawer(false);
+                  }}
+                  type="button"
+                >
+                  Delete photo
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -1717,7 +3026,14 @@ function SortableStopItem(props: {
       }`}
       onClick={props.onClick}
     >
-      <button className="flex h-9 w-9 cursor-grab touch-none items-center justify-center text-ink/30 hover:text-ink/60 sm:h-11 sm:w-11" {...attributes} {...listeners} type="button">
+      <button
+        aria-label={`Reorder ${props.stop.name}`}
+        className="flex h-9 w-9 cursor-grab touch-none items-center justify-center text-ink/30 hover:text-ink/60 sm:h-11 sm:w-11"
+        title={`Reorder ${props.stop.name}`}
+        {...attributes}
+        {...listeners}
+        type="button"
+      >
         <GripVertical className="h-4 w-4" />
       </button>
       {editing ? (
@@ -1798,11 +3114,12 @@ function PhotosSection(props: {
   batchDayId: string;
   setBatchDayId: (value: string) => void;
   savingBatch: boolean;
+  uploadInFlight: boolean;
+  uploadLabel: string;
+  onUploadPhotos: (files: File[]) => Promise<void>;
   onBatchAssign: () => void;
 }) {
-  const [uploading, setUploading] = useState(false);
   const [selectedPhotoId, setSelectedPhotoId] = useState(props.photos[0]?.id ?? "");
-  const router = useRouter();
 
   const unassigned = props.photos.filter((p) => p.status === "unassigned");
   const selectedPhoto = props.photos.find((photo) => photo.id === selectedPhotoId) ?? props.photos[0] ?? null;
@@ -1839,96 +3156,72 @@ function PhotosSection(props: {
       {props.expanded && (
         <>
           <label className="mt-4 flex cursor-pointer items-center justify-between rounded-xl border-2 border-olive/70 bg-olive/15 px-5 py-6 text-base font-semibold text-ink shadow-md ring-2 ring-olive/20 transition hover:border-olive hover:bg-olive/25 hover:ring-olive/30 sm:mt-6 sm:rounded-[1.4rem] sm:px-8 sm:py-8">
-        <span>{uploading ? "Uploading..." : "Upload trip photos"}</span>
-        <input
-          className="hidden"
-          multiple
-          disabled={uploading}
-          onChange={async (event) => {
-            const files = Array.from(event.target.files ?? []);
-            if (files.length === 0) return;
-            setUploading(true);
-            try {
-              const isHeic = (f: File) =>
-                f.type === "image/heic" || f.type === "image/heif" || /\.(heic|heif)$/i.test(f.name);
-              const toUpload = (
-                await Promise.all(
-                  files.map(async (file): Promise<File[]> => {
-                    if (!isHeic(file)) return [file];
-                    const result = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.92 });
-                    const blobs = Array.isArray(result) ? result : [result];
-                    const base = file.name.replace(/\.(heic|heif)$/i, "");
-                    return blobs.map((blob, i) =>
-                      new File([blob], blobs.length > 1 ? `${base}-${i}.jpg` : `${base}.jpg`, {
-                        type: "image/jpeg"
-                      })
-                    );
-                  })
-                )
-              ).flat();
-
-              const formData = new FormData();
-              formData.set("tripId", props.tripId);
-              formData.set("timezone", Intl.DateTimeFormat().resolvedOptions().timeZone);
-              formData.set("tripDays", JSON.stringify(props.days.map((day) => ({ date: day.date, id: day.id }))));
-              for (const file of toUpload) formData.append("photos", file);
-
-              const response = await fetch(`/api/trips/${props.tripId}/photos/upload`, { body: formData, method: "POST" });
-              if (!response.ok) {
-                toast.error("Unable to upload photos");
-                return;
-              }
-              toast.success(`${toUpload.length} photo${toUpload.length === 1 ? "" : "s"} uploaded`);
-              router.refresh();
-            } finally {
-              setUploading(false);
-            }
-          }}
-          type="file"
-          accept="image/*"
-        />
-        <span className="rounded-full bg-olive px-5 py-2.5 font-mono text-xs font-semibold uppercase tracking-[0.22em] text-paper shadow-sm">Pick files</span>
-      </label>
+            <span className="grid gap-1">
+              <span>{props.uploadLabel}</span>
+              <span className="text-xs font-normal uppercase tracking-[0.18em] text-ink/58">
+                Upload up to {MAX_TRIP_PHOTO_UPLOADS} photos per batch
+              </span>
+            </span>
+            <input
+              accept="image/*"
+              className="hidden"
+              disabled={props.uploadInFlight}
+              multiple
+              onChange={async (event) => {
+                const files = Array.from(event.target.files ?? []);
+                if (files.length === 0) return;
+                try {
+                  await props.onUploadPhotos(files);
+                } finally {
+                  event.target.value = "";
+                }
+              }}
+              type="file"
+            />
+            <span className="rounded-full bg-olive px-5 py-2.5 font-mono text-xs font-semibold uppercase tracking-[0.22em] text-paper shadow-sm">
+              Pick files
+            </span>
+          </label>
           <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-ink/55 sm:mt-5">
             <span className="rounded-full border border-ink/10 bg-paper px-3 py-1">{props.photos.length} photos in library</span>
             <span className="rounded-full border border-ink/10 bg-paper px-3 py-1">{unassigned.length} unassigned</span>
           </div>
 
-      {/* Batch assign bar */}
+          {/* Batch assign bar */}
           {unassigned.length > 0 && (
             <div className="mt-4 flex flex-wrap items-center gap-3 rounded-[1.4rem] border border-olive/15 bg-sand/20 px-4 py-3">
-          <button
-            className="rounded-full border-2 border-ink/30 px-3 py-1 text-xs uppercase tracking-[0.18em] text-ink/70"
-            onClick={() => {
-              const allUnassignedIds = new Set(unassigned.map((p) => p.id));
-              props.setSelectedPhotoIds((current) => current.size === allUnassignedIds.size ? new Set() : allUnassignedIds);
-            }}
-            type="button"
-          >
-            {props.selectedPhotoIds.size === unassigned.length ? "Deselect all" : `Select all unassigned (${unassigned.length})`}
-          </button>
-          {props.selectedPhotoIds.size > 0 && (
-            <>
-              <select
-                className="h-10 rounded-[1rem] border border-ink/10 bg-paper px-3 text-sm text-ink outline-none"
-                onChange={(e) => props.setBatchDayId(e.target.value)}
-                value={props.batchDayId}
-              >
-                <option value="">Assign to day...</option>
-                {props.days.map((day) => (
-                  <option key={day.id} value={day.id}>Day {day.dayIndex} · {day.title || day.date}</option>
-                ))}
-              </select>
               <button
-                className="rounded-full bg-ink px-4 py-2 text-xs uppercase tracking-[0.18em] text-paper disabled:opacity-55"
-                disabled={!props.batchDayId || props.savingBatch}
-                onClick={props.onBatchAssign}
+                className="rounded-full border-2 border-ink/30 px-3 py-1 text-xs uppercase tracking-[0.18em] text-ink/70"
+                onClick={() => {
+                  const allUnassignedIds = new Set(unassigned.map((p) => p.id));
+                  props.setSelectedPhotoIds((current) => current.size === allUnassignedIds.size ? new Set() : allUnassignedIds);
+                }}
                 type="button"
               >
-                {props.savingBatch ? "Assigning..." : `Assign ${props.selectedPhotoIds.size} photo${props.selectedPhotoIds.size === 1 ? "" : "s"}`}
+                {props.selectedPhotoIds.size === unassigned.length ? "Deselect all" : `Select all unassigned (${unassigned.length})`}
               </button>
-            </>
-          )}
+              {props.selectedPhotoIds.size > 0 && (
+                <>
+                  <select
+                    className="h-10 rounded-[1rem] border border-ink/10 bg-paper px-3 text-sm text-ink outline-none"
+                    onChange={(e) => props.setBatchDayId(e.target.value)}
+                    value={props.batchDayId}
+                  >
+                    <option value="">Assign to day...</option>
+                    {props.days.map((day) => (
+                      <option key={day.id} value={day.id}>Day {day.dayIndex} · {day.title || day.date}</option>
+                    ))}
+                  </select>
+                  <button
+                    className="rounded-full bg-ink px-4 py-2 text-xs uppercase tracking-[0.18em] text-paper disabled:opacity-55"
+                    disabled={!props.batchDayId || props.savingBatch}
+                    onClick={props.onBatchAssign}
+                    type="button"
+                  >
+                    {props.savingBatch ? "Assigning..." : `Assign ${props.selectedPhotoIds.size} photo${props.selectedPhotoIds.size === 1 ? "" : "s"}`}
+                  </button>
+                </>
+              )}
             </div>
           )}
 
@@ -2419,6 +3712,86 @@ function StudioTextArea(props: {
 
 // ------ Pure helpers ------
 
+function parseMobileEditTab(value: string | null): MobileEditTab | null {
+  if (value === "photos" || value === "places" || value === "stories" || value === "more") return value;
+  return null;
+}
+
+function getQueryParam(key: string) {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get(key) ?? "";
+}
+
+function readLastEditedDayId(tripId: string) {
+  if (!tripId || typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(`trip-studio:${tripId}:last-edited-day-id`) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeLastEditedDayId(tripId: string, dayId: string) {
+  if (!tripId || !dayId || typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(`trip-studio:${tripId}:last-edited-day-id`, dayId);
+  } catch {
+    // ignore local storage failures
+  }
+}
+
+function isDayStoryComplete(day: StudioDayDraft) {
+  return Boolean(
+    day.cityLabel.trim() &&
+    day.title.trim() &&
+    day.summary.trim() &&
+    day.highlightMoment.trim() &&
+    day.journal.trim()
+  );
+}
+
+function resolvePreferredDayId(
+  days: StudioDayDraft[],
+  options: { requestedDayId?: string; currentDayId?: string; storedDayId?: string }
+) {
+  if (days.length === 0) return "";
+
+  const { requestedDayId = "", currentDayId = "", storedDayId = "" } = options;
+  const matches = (dayId: string) => days.some((day) => day.id === dayId);
+
+  if (requestedDayId && matches(requestedDayId)) return requestedDayId;
+  if (storedDayId && matches(storedDayId)) return storedDayId;
+  if (currentDayId && matches(currentDayId)) return currentDayId;
+
+  const firstIncomplete = days.find((day) => !isDayStoryComplete(day));
+  return firstIncomplete?.id ?? days[0]?.id ?? "";
+}
+
+function mergeUploadedPhotos(nextPhotos: TripStudioPhoto[], currentPhotos: TripStudioPhoto[]) {
+  const merged = [...nextPhotos, ...currentPhotos];
+  const seen = new Set<string>();
+
+  return merged.filter((photo) => {
+    if (seen.has(photo.id)) return false;
+    seen.add(photo.id);
+    return true;
+  });
+}
+
+function resolveStudioSaveLabel(options: {
+  overviewAutoSave: { status: string; dirty: boolean };
+  daysAutoSave: { status: string; dirty: boolean };
+  photosAutoSave: { status: string; dirty: boolean };
+}) {
+  const statuses = [options.overviewAutoSave.status, options.daysAutoSave.status, options.photosAutoSave.status];
+  const hasDirty = options.overviewAutoSave.dirty || options.daysAutoSave.dirty || options.photosAutoSave.dirty;
+
+  if (statuses.includes("error")) return "Save failed";
+  if (statuses.includes("saving")) return "Saving changes...";
+  if (hasDirty) return "Changes queued";
+  return "All changes saved";
+}
+
 function parseCompanions(value: string) {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
@@ -2439,9 +3812,7 @@ function getCollectionStatus(count: number): SectionStatus {
 function getDayStoriesStatus(days: StudioDayDraft[]): SectionStatus {
   if (days.length === 0) return "empty";
 
-  const readyDays = days.filter(
-    (day) => Boolean(day.cityLabel.trim() && day.title.trim() && day.summary.trim() && day.highlightMoment.trim() && day.journal.trim())
-  );
+  const readyDays = days.filter(isDayStoryComplete);
 
   if (readyDays.length === days.length) return "ready";
 

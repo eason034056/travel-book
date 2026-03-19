@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import * as exifr from "exifr";
 import { NextResponse } from "next/server";
 
+import { signTripPhotoUrl } from "@/lib/server/r2";
 import { getViewerEmail } from "@/lib/server/session";
 import { uploadPhotosForTrip } from "@/lib/server/trip-studio-service";
 
@@ -43,15 +44,30 @@ export async function POST(request: Request, context: { params: Promise<{ tripId
       })
     );
 
-    return NextResponse.json(
-      await uploadPhotosForTrip({
-        tripDays: tripDays.map((day) => ({ date: day.date, day_id: day.id })),
-        tripId,
-        timezone,
-        uploads,
-        viewerEmail
-      })
-    );
+    const result = await uploadPhotosForTrip({
+      tripDays: tripDays.map((day) => ({ date: day.date, day_id: day.id })),
+      tripId,
+      timezone,
+      uploads,
+      viewerEmail
+    });
+
+    return NextResponse.json({
+      ...result,
+      uploadedPhotos: await Promise.all(
+        result.uploadedPhotos.map(async (photo) => ({
+          alt: "",
+          capturedAt: photo.capturedAt,
+          createdAt: new Date().toISOString(),
+          dayId: photo.assignedDayId ?? "",
+          id: photo.photoId,
+          originalFilename: photo.originalFilename,
+          previewUrl: await signTripPhotoUrl(photo.storageKey),
+          status: photo.assignedDayId ? "ready" : "unassigned",
+          storageKey: photo.storageKey
+        }))
+      )
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to upload photos";
     return NextResponse.json({ message }, { status: message === "Forbidden" ? 403 : 400 });

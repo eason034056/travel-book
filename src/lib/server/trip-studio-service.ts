@@ -1,15 +1,17 @@
 import crypto from "node:crypto";
 
+import type { TripStudioPhoto } from "@/types/travel";
 import type { TravelSheetWorkbook, TripDaySheetRow, TripMembershipSheetRow, TripPhotoSheetRow, TripSheetRow, TripStopSheetRow } from "@/lib/server/travel-sheet-schema";
 
 import { assignPhotosToDays } from "@/lib/photo-assignment";
+import { MAX_TRIP_PHOTO_UPLOADS } from "@/lib/trip-photo-upload-contract";
 import { buildPhotoRowsForPersistence } from "@/lib/server/photo-records";
 import { buildStopImportRows } from "@/lib/server/google-links-import";
 import { appendTableRows, readTravelWorkbook, replaceTableRows } from "@/lib/server/google-sheets";
 import { createInviteTokenRecord } from "@/lib/server/invite-token";
 import { isExternalAssetUrl } from "@/lib/server/trip-media";
 import { buildDateDrivenDayRows, buildTripId, planTripDayRange } from "@/lib/server/trip-studio-model";
-import { deleteTripStorageKeys, uploadTripPhoto } from "@/lib/server/r2";
+import { createTripPhotoUploadTarget, deleteTripStorageKeys, signTripPhotoUrl, uploadTripPhoto } from "@/lib/server/r2";
 
 interface EditableTripDayPayload {
   date: string;
@@ -506,7 +508,113 @@ export async function uploadPhotosForTrip(options: {
 
   await appendTableRows("tripPhotos", rows);
 
-  return assignments;
+  return {
+    assigned: assignments.assigned,
+    unassigned: assignments.unassigned,
+    uploadedPhotos
+  };
+}
+
+export async function preparePhotoUploadsForTrip(options: {
+  tripId: string;
+  viewerEmail: string;
+  files: Array<{
+    originalFilename: string;
+    contentType: string;
+  }>;
+}) {
+  if (options.files.length > MAX_TRIP_PHOTO_UPLOADS) {
+    throw new Error("You can upload up to 10 photos at a time.");
+  }
+
+  const workbook = await readTravelWorkbook();
+
+  assertTripEditorAccess(workbook, options.tripId, options.viewerEmail);
+
+  return Promise.all(
+    options.files.map((file) =>
+      createTripPhotoUploadTarget({
+        contentType: normalizeUploadContentType(file.contentType),
+        originalFilename: file.originalFilename,
+        tripId: options.tripId
+      })
+    )
+  );
+}
+
+export async function completePhotoUploadsForTrip(options: {
+  tripId: string;
+  tripDays: Array<Pick<TripDaySheetRow, "day_id" | "date">>;
+  timezone: string;
+  viewerEmail: string;
+  uploads: Array<{
+    photoId: string;
+    originalFilename: string;
+    contentType: string;
+    storageKey: string;
+    capturedAt?: string;
+  }>;
+}) {
+  const storageKeys = options.uploads.map((upload) => upload.storageKey);
+
+  try {
+    const workbook = await readTravelWorkbook();
+
+    assertTripEditorAccess(workbook, options.tripId, options.viewerEmail);
+    assertUploadCountWithinLimit(options.uploads.length);
+    assertTripStorageKeys(options.tripId, storageKeys);
+
+    const assignments = assignPhotosToDays(
+      options.uploads.map((upload) => ({
+        capturedAt: upload.capturedAt,
+        id: upload.photoId
+      })),
+      options.tripDays.map((day) => ({ date: day.date, id: day.day_id })),
+      options.timezone
+    );
+    const uploadedPhotos = options.uploads.map((upload) => {
+      const assignedDayId = assignments.assigned.find((assignment) => assignment.photoId === upload.photoId)?.dayId;
+
+      return {
+        assignedDayId,
+        capturedAt: upload.capturedAt,
+        originalFilename: upload.originalFilename,
+        photoId: upload.photoId,
+        storageKey: upload.storageKey
+      };
+    });
+    const rows = buildPhotoRowsForPersistence({
+      photos: uploadedPhotos,
+      tripId: options.tripId,
+      uploadedAt: new Date().toISOString()
+    });
+
+    await appendTableRows("tripPhotos", rows);
+
+    return {
+      ...assignments,
+      uploadedPhotos: await Promise.all(
+        rows.map(async (row): Promise<TripStudioPhoto> => ({
+          alt: row.alt,
+          capturedAt: row.captured_at || undefined,
+          createdAt: row.created_at,
+          dayId: row.day_id,
+          id: row.photo_id,
+          originalFilename: row.original_filename,
+          previewUrl: await signTripPhotoUrl(row.storage_key),
+          status: row.status === "ready" ? "ready" : "unassigned",
+          storageKey: row.storage_key
+        }))
+      )
+    };
+  } catch (error) {
+    try {
+      await deleteTripStorageKeys(storageKeys);
+    } catch {
+      // Preserve the original persistence error.
+    }
+    throw error;
+  }
 }
 
 export async function updatePhotoForTrip(options: {
@@ -702,6 +810,22 @@ function assertTripEditorAccess(workbook: TravelSheetWorkbook, tripId: string, v
   }
 
   return membership;
+}
+
+function assertUploadCountWithinLimit(count: number) {
+  if (count > MAX_TRIP_PHOTO_UPLOADS) {
+    throw new Error("You can upload up to 10 photos at a time.");
+  }
+}
+
+function assertTripStorageKeys(tripId: string, storageKeys: string[]) {
+  if (storageKeys.some((storageKey) => !storageKey.startsWith(`trips/${tripId}/`))) {
+    throw new Error("Invalid storage key");
+  }
+}
+
+function normalizeUploadContentType(contentType: string) {
+  return contentType || "application/octet-stream";
 }
 
 function assertTripOwnerAccess(workbook: TravelSheetWorkbook, tripId: string, viewerEmail: string) {

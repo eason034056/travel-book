@@ -229,6 +229,32 @@ R2_ENDPOINT=https://YOUR_ACCOUNT_ID.r2.cloudflarestorage.com
 
 Replace `YOUR_ACCOUNT_ID` with the same value from `R2_ACCOUNT_ID`.
 
+### 7.5 Configure R2 CORS for direct browser uploads
+
+The trip studio now uploads photos straight from the browser to R2, then calls the app again to finalize metadata writes. This avoids Vercel request body limits, but it means the bucket must allow browser `PUT` requests from your app origin.
+
+In the Cloudflare dashboard, open the bucket and add a CORS policy like:
+
+```json
+[
+  {
+    "AllowedOrigins": [
+      "http://localhost:3000",
+      "https://YOUR_PRODUCTION_DOMAIN"
+    ],
+    "AllowedMethods": ["PUT", "GET", "HEAD"],
+    "AllowedHeaders": ["Content-Type"],
+    "ExposeHeaders": ["ETag"]
+  }
+]
+```
+
+Notes:
+
+- Replace `https://YOUR_PRODUCTION_DOMAIN` with your real site origin.
+- If you use both a custom domain and `*.vercel.app`, add both origins.
+- Keep the bucket private; the app still serves signed read URLs for display.
+
 ## 8. Set the Base App URL
 
 For local development:
@@ -379,9 +405,10 @@ Expected result:
 ### 15.2 Photo upload
 
 1. Upload one or more photos.
-2. The app reads EXIF timestamps.
-3. It uploads files into the private R2 bucket.
-4. It writes metadata rows into `trip_photos`.
+2. The browser reads EXIF timestamps locally.
+3. The app prepares signed upload URLs for that trip.
+4. The browser uploads files directly into the private R2 bucket.
+5. The app writes metadata rows into `trip_photos`.
 
 Expected result:
 
@@ -450,10 +477,12 @@ Cause:
 
 - R2 credentials or endpoint are wrong
 - Signed URL generation is failing
+- Bucket CORS does not allow your app origin or the `Content-Type` header
 
 Fix:
 
 - Recheck `R2_*` values
+- Confirm the bucket CORS policy includes `http://localhost:3000` and your production origin
 - Confirm the bucket is private and the credentials can read and write objects
 
 ### Invited user signs in but cannot join

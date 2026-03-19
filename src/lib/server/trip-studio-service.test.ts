@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { trips as mockTrips } from "@/data/mock-trips";
 import {
+  completePhotoUploadsForTrip,
   createCollaboratorInvite,
   cancelPendingInviteForTrip,
   createTripForViewer,
   deleteTripForViewer,
+  preparePhotoUploadsForTrip,
   revokeCollaboratorForTrip,
   updateTripOverview
 } from "@/lib/server/trip-studio-service";
@@ -23,6 +25,7 @@ const googleSheets = vi.hoisted(() => ({
 }));
 
 const r2 = vi.hoisted(() => ({
+  createTripPhotoUploadTarget: vi.fn(),
   deleteTripStorageKeys: vi.fn(),
   uploadTripPhoto: vi.fn()
 }));
@@ -341,6 +344,84 @@ describe("trip studio service", () => {
         viewerEmail: "owner@example.com"
       })
     ).rejects.toThrow("That collaborator already has a pending invite");
+  });
+
+  test("prepares direct upload targets for editable trips", async () => {
+    const workbook = buildTravelSheetSeed({
+      seededAt: "2026-03-17T12:00:00.000Z",
+      trips: mockTrips,
+      ownerEmail: "owner@example.com"
+    });
+
+    googleSheets.readTravelWorkbook.mockResolvedValue(workbook);
+    r2.createTripPhotoUploadTarget.mockImplementation(async ({ tripId, originalFilename, contentType }) => ({
+      contentType,
+      originalFilename,
+      photoId: `${originalFilename}-photo-id`,
+      storageKey: `trips/${tripId}/${originalFilename}`,
+      uploadUrl: `https://r2.example.com/${originalFilename}`
+    }));
+
+    const result = await preparePhotoUploadsForTrip({
+      tripId: "kyoto-2026",
+      viewerEmail: "owner@example.com",
+      files: [
+        {
+          contentType: "image/jpeg",
+          originalFilename: "torii.jpg"
+        }
+      ]
+    });
+
+    expect(result).toEqual([
+      {
+        contentType: "image/jpeg",
+        originalFilename: "torii.jpg",
+        photoId: "torii.jpg-photo-id",
+        storageKey: "trips/kyoto-2026/torii.jpg",
+        uploadUrl: "https://r2.example.com/torii.jpg"
+      }
+    ]);
+    expect(r2.createTripPhotoUploadTarget).toHaveBeenCalledWith({
+      contentType: "image/jpeg",
+      originalFilename: "torii.jpg",
+      tripId: "kyoto-2026"
+    });
+  });
+
+  test("cleans up uploaded keys when photo metadata persistence fails", async () => {
+    const workbook = buildTravelSheetSeed({
+      seededAt: "2026-03-17T12:00:00.000Z",
+      trips: mockTrips,
+      ownerEmail: "owner@example.com"
+    });
+
+    googleSheets.readTravelWorkbook.mockResolvedValue(workbook);
+    googleSheets.appendTableRows.mockRejectedValueOnce(new Error("Sheets unavailable"));
+
+    await expect(
+      completePhotoUploadsForTrip({
+        tripDays: [
+          {
+            date: "2026-04-12",
+            day_id: "kyoto-day-1"
+          }
+        ],
+        tripId: "kyoto-2026",
+        timezone: "Asia/Tokyo",
+        uploads: [
+          {
+            contentType: "image/jpeg",
+            originalFilename: "torii.jpg",
+            photoId: "photo-1",
+            storageKey: "trips/kyoto-2026/torii.jpg"
+          }
+        ],
+        viewerEmail: "owner@example.com"
+      })
+    ).rejects.toThrow("Sheets unavailable");
+
+    expect(r2.deleteTripStorageKeys).toHaveBeenCalledWith(["trips/kyoto-2026/torii.jpg"]);
   });
 
   test("hard delete is owner-only and clears workbook rows plus internal R2 keys", async () => {
