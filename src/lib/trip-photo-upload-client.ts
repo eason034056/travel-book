@@ -39,27 +39,39 @@ function isHeic(file: File) {
 }
 
 async function toUploadableFiles(files: File[]) {
-  const converted = await Promise.all(
-    files.map(async (file): Promise<File[]> => {
-      if (!isHeic(file)) {
-        return [file];
+  const uploadableFiles: File[] = [];
+  const conversionFailedFiles: string[] = [];
+
+  for (const file of files) {
+    if (!isHeic(file)) {
+      uploadableFiles.push(file);
+      continue;
+    }
+
+    try {
+      const result = await heic2any({ blob: file, quality: 0.92, toType: "image/jpeg" });
+      const convertedBlob = Array.isArray(result) ? result[0] : result;
+
+      if (!(convertedBlob instanceof Blob)) {
+        conversionFailedFiles.push(file.name);
+        continue;
       }
 
-      const result = await heic2any({ blob: file, quality: 0.92, toType: "image/jpeg" });
-      const blobs = Array.isArray(result) ? result : [result];
-      const base = file.name.replace(/\.(heic|heif)$/i, "");
-
-      return blobs.map((blob, index) => {
-        const filename = blobs.length > 1 ? `${base}-${index}.jpg` : `${base}.jpg`;
-
-        return new File([blob], filename, {
+      const filename = `${file.name.replace(/\.(heic|heif)$/i, "")}.jpg`;
+      uploadableFiles.push(
+        new File([convertedBlob], filename, {
           type: "image/jpeg"
-        });
-      });
-    })
-  );
+        })
+      );
+    } catch {
+      conversionFailedFiles.push(file.name);
+    }
+  }
 
-  return converted.flat();
+  return {
+    conversionFailedFiles,
+    uploadableFiles
+  };
 }
 
 async function parseErrorMessage(response: Response, fallback: string) {
@@ -141,7 +153,7 @@ export async function uploadTripPhotosDirect(options: {
     throw new Error("You can upload up to 10 photos at a time.");
   }
 
-  const uploadableFiles = await toUploadableFiles(options.files);
+  const { conversionFailedFiles, uploadableFiles } = await toUploadableFiles(options.files);
 
   if (uploadableFiles.length > MAX_TRIP_PHOTO_UPLOADS) {
     throw new Error("You can upload up to 10 photos at a time.");
@@ -153,7 +165,11 @@ export async function uploadTripPhotosDirect(options: {
     total: uploadableFiles.length
   });
 
-  const failedFiles: string[] = [];
+  const failedFiles: string[] = [...conversionFailedFiles];
+  let firstFailureMessage =
+    conversionFailedFiles.length > 0
+      ? "Some HEIC photos could not be converted. Please try JPG or iPhone Most Compatible format."
+      : null;
   let assignments = emptyAssignments();
   let uploadedCount = 0;
 
@@ -175,9 +191,16 @@ export async function uploadTripPhotosDirect(options: {
 
       assignments = mergeAssignments(assignments, response);
       uploadedCount += response.uploadedPhotos?.length ?? 1;
-    } catch {
+    } catch (error) {
+      if (!firstFailureMessage && error instanceof Error && error.message.trim().length > 0) {
+        firstFailureMessage = error.message;
+      }
       failedFiles.push(file.name);
     }
+  }
+
+  if (uploadedCount === 0 && failedFiles.length > 0) {
+    throw new Error(firstFailureMessage ?? "Unable to upload photos.");
   }
 
   return {

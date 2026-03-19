@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+const heic2anyMock = vi.hoisted(() => vi.fn());
+
 vi.mock("exifr", () => ({
   parse: vi.fn()
 }));
 
 vi.mock("heic2any", () => ({
-  default: vi.fn()
+  default: heic2anyMock
 }));
 
 import { MAX_TRIP_PHOTO_UPLOADS, type CompleteTripPhotoUploadsResponse } from "@/lib/trip-photo-upload-contract";
@@ -206,6 +208,26 @@ describe("uploadTripPhotosDirect", () => {
       totalFiles: 3,
       uploadedCount: 2
     });
+  });
+
+  test("throws a readable error when every HEIC file fails conversion", async () => {
+    const heicFile = new File(["heic-data"], "iphone.heic", { type: "image/heic" });
+    const fetchMock = vi.fn();
+
+    heic2anyMock.mockRejectedValueOnce(new Error("conversion failed"));
+
+    await expect(
+      uploadTripPhotosDirect({
+        days: [{ date: "2026-04-12", id: "kyoto-day-1" }],
+        fetchImpl: fetchMock,
+        files: [heicFile],
+        timezone: "Asia/Tokyo",
+        tripId: "kyoto-2026"
+      })
+    ).rejects.toThrow("Some HEIC photos could not be converted. Please try JPG or iPhone Most Compatible format.");
+
+    expect(heic2anyMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test("rejects batches larger than the supported upload limit", async () => {

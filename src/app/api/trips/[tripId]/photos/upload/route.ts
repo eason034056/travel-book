@@ -29,15 +29,23 @@ export async function POST(request: Request, context: { params: Promise<{ tripId
     const uploads = await Promise.all(
       files.map(async (file) => {
         const body = new Uint8Array(await file.arrayBuffer());
-        const metadata = await exifr.parse(body, {
-          pick: ["DateTimeOriginal", "CreateDate"]
-        });
-        const capturedAt = metadata?.DateTimeOriginal ?? metadata?.CreateDate;
+        let capturedAt: string | undefined;
+
+        try {
+          const metadata = await exifr.parse(body, {
+            pick: ["DateTimeOriginal", "CreateDate"]
+          });
+          const maybeCapturedAt = metadata?.DateTimeOriginal ?? metadata?.CreateDate;
+          capturedAt = maybeCapturedAt instanceof Date ? maybeCapturedAt.toISOString() : undefined;
+        } catch {
+          // Some images have malformed or unsupported EXIF blocks. Upload should still succeed.
+          capturedAt = undefined;
+        }
 
         return {
           body,
           contentType: file.type || "application/octet-stream",
-          capturedAt: capturedAt instanceof Date ? capturedAt.toISOString() : undefined,
+          capturedAt,
           originalFilename: file.name,
           photoId: `${file.name}-${crypto.randomUUID()}`
         };
