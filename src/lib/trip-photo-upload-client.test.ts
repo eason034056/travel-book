@@ -25,6 +25,7 @@ function jsonResponse(body: unknown, status = 200) {
 describe("uploadTripPhotosDirect", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
   test("uploads photos one by one through the trip upload route", async () => {
@@ -247,5 +248,43 @@ describe("uploadTripPhotosDirect", () => {
     ).rejects.toThrow("You can upload up to 10 photos at a time.");
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("calls browser fetch with the proper Window binding when no fetchImpl is provided", async () => {
+    const strictFetch = vi.fn(function (this: typeof globalThis) {
+      if (this !== globalThis) {
+        throw new Error("Can only call Window.fetch on instances of Window");
+      }
+
+      return Promise.resolve(
+        jsonResponse({
+          assigned: [{ dayId: "kyoto-day-1", photoId: "photo-1" }],
+          unassigned: [],
+          uploadedPhotos: [
+            {
+              alt: "",
+              dayId: "kyoto-day-1",
+              id: "photo-1",
+              originalFilename: "torii.jpg",
+              previewUrl: "https://example.com/torii.jpg",
+              status: "ready",
+              storageKey: "trips/kyoto-2026/torii.jpg"
+            }
+          ]
+        } satisfies CompleteTripPhotoUploadsResponse)
+      );
+    });
+
+    vi.stubGlobal("fetch", strictFetch);
+
+    const result = await uploadTripPhotosDirect({
+      days: [{ date: "2026-04-12", id: "kyoto-day-1" }],
+      files: [new File(["one"], "torii.jpg", { type: "image/jpeg" })],
+      timezone: "Asia/Tokyo",
+      tripId: "kyoto-2026"
+    });
+
+    expect(strictFetch).toHaveBeenCalledTimes(1);
+    expect(result.uploadedCount).toBe(1);
   });
 });

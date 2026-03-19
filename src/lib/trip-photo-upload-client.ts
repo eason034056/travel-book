@@ -137,7 +137,9 @@ export async function uploadTripPhotosDirect(options: {
   onProgress?: (progress: TripPhotoUploadProgress) => void;
   fetchImpl?: typeof fetch;
 }): Promise<DirectTripPhotoUploadResult> {
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl =
+    options.fetchImpl ??
+    ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
 
   if (options.files.length === 0) {
     return {
