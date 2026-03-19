@@ -1,17 +1,11 @@
-import * as exifr from "exifr";
 import heic2any from "heic2any";
 
 import {
   MAX_TRIP_PHOTO_UPLOADS,
-  type CompleteTripPhotoUploadsRequest,
   type CompleteTripPhotoUploadsResponse,
-  type PrepareTripPhotoUploadsRequest,
-  type PrepareTripPhotoUploadsResponse,
   type TripPhotoUploadDay,
   type TripPhotoUploadProgress
 } from "@/lib/trip-photo-upload-contract";
-
-const IMAGE_CONTENT_TYPE_FALLBACK = "application/octet-stream";
 
 export interface DirectTripPhotoUploadResult {
   uploadedCount: number;
@@ -31,6 +25,13 @@ export function formatTripPhotoUploadProgress(progress: TripPhotoUploadProgress)
   }
 
   return `Preparing ${progress.total} photo${progress.total === 1 ? "" : "s"}...`;
+}
+
+export function getTripPhotoUploadPercent(progress: TripPhotoUploadProgress) {
+  if (progress.total <= 0) return 0;
+  if (progress.current <= 0) return 0;
+
+  return Math.min(100, Math.max(8, Math.round((progress.current / progress.total) * 100)));
 }
 
 function isHeic(file: File) {
@@ -59,19 +60,6 @@ async function toUploadableFiles(files: File[]) {
   );
 
   return converted.flat();
-}
-
-async function readCapturedAt(file: File) {
-  try {
-    const metadata = await exifr.parse(file, {
-      pick: ["DateTimeOriginal", "CreateDate"]
-    });
-    const capturedAt = metadata?.DateTimeOriginal ?? metadata?.CreateDate;
-
-    return capturedAt instanceof Date ? capturedAt.toISOString() : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 async function parseErrorMessage(response: Response, fallback: string) {
@@ -165,114 +153,19 @@ export async function uploadTripPhotosDirect(options: {
     total: uploadableFiles.length
   });
 
-  const prepareRequest: PrepareTripPhotoUploadsRequest = {
-    files: uploadableFiles.map((file) => ({
-      contentType: file.type || IMAGE_CONTENT_TYPE_FALLBACK,
-      originalFilename: file.name
-    }))
-  };
-  const prepareResponse = await fetchImpl(`/api/trips/${options.tripId}/photos/upload/prepare`, {
-    body: JSON.stringify(prepareRequest),
-    headers: {
-      "Content-Type": "application/json"
-    },
-    method: "POST"
-  });
-
-  if (!prepareResponse.ok) {
-    throw new Error(await parseErrorMessage(prepareResponse, "Unable to prepare photo uploads"));
-  }
-
-  const preparePayload = (await prepareResponse.json()) as PrepareTripPhotoUploadsResponse;
   const failedFiles: string[] = [];
-  const completedUploads: CompleteTripPhotoUploadsRequest["uploads"] = [];
-  const serverFallbackFiles: File[] = [];
+  let assignments = emptyAssignments();
+  let uploadedCount = 0;
 
   for (const [index, file] of uploadableFiles.entries()) {
-    const preparedUpload = preparePayload.uploads[index];
-
-    if (!preparedUpload) {
-      serverFallbackFiles.push(file);
-      continue;
-    }
-
     options.onProgress?.({
       current: index + 1,
       phase: "uploading",
       total: uploadableFiles.length
     });
 
-    let uploadResponse: Response;
-
     try {
-      uploadResponse = await fetchImpl(preparedUpload.uploadUrl, {
-        body: file,
-        headers: {
-          "Content-Type": preparedUpload.contentType
-        },
-        method: "PUT"
-      });
-    } catch {
-      serverFallbackFiles.push(...uploadableFiles.slice(index));
-      break;
-    }
-
-    if (!uploadResponse.ok) {
-      serverFallbackFiles.push(...uploadableFiles.slice(index));
-      break;
-    }
-
-    completedUploads.push({
-      capturedAt: await readCapturedAt(file),
-      contentType: preparedUpload.contentType,
-      originalFilename: preparedUpload.originalFilename,
-      photoId: preparedUpload.photoId,
-      storageKey: preparedUpload.storageKey
-    });
-  }
-
-  let assignments = emptyAssignments();
-  let uploadedCount = 0;
-
-  if (completedUploads.length > 0) {
-    options.onProgress?.({
-      current: completedUploads.length,
-      phase: "finalizing",
-      total: completedUploads.length
-    });
-
-    const completeResponse = await fetchImpl(`/api/trips/${options.tripId}/photos/upload/complete`, {
-      body: JSON.stringify({
-        timezone: options.timezone,
-        tripDays: options.days,
-        uploads: completedUploads
-      } satisfies CompleteTripPhotoUploadsRequest),
-      headers: {
-        "Content-Type": "application/json"
-      },
-      method: "POST"
-    });
-
-    if (!completeResponse.ok) {
-      throw new Error(await parseErrorMessage(completeResponse, "Unable to finalize photo uploads"));
-    }
-
-    assignments = mergeAssignments(
-      assignments,
-      (await completeResponse.json()) as CompleteTripPhotoUploadsResponse
-    );
-    uploadedCount += completedUploads.length;
-  }
-
-  for (const [index, file] of serverFallbackFiles.entries()) {
-    options.onProgress?.({
-      current: completedUploads.length + index + 1,
-      phase: "uploading",
-      total: uploadableFiles.length
-    });
-
-    try {
-      const fallbackAssignments = await uploadTripPhotoViaServer({
+      const response = await uploadTripPhotoViaServer({
         days: options.days,
         fetchImpl,
         file,
@@ -280,25 +173,15 @@ export async function uploadTripPhotosDirect(options: {
         tripId: options.tripId
       });
 
-      assignments = mergeAssignments(assignments, fallbackAssignments);
-      uploadedCount += fallbackAssignments.uploadedPhotos?.length ?? 1;
+      assignments = mergeAssignments(assignments, response);
+      uploadedCount += response.uploadedPhotos?.length ?? 1;
     } catch {
       failedFiles.push(file.name);
     }
   }
 
-  if (uploadedCount === 0) {
-    return {
-      assignments: emptyAssignments(),
-      failedCount: failedFiles.length,
-      failedFiles,
-      totalFiles: uploadableFiles.length,
-      uploadedCount: 0
-    };
-  }
-
   return {
-    assignments,
+    assignments: uploadedCount > 0 ? assignments : emptyAssignments(),
     failedCount: failedFiles.length,
     failedFiles,
     totalFiles: uploadableFiles.length,

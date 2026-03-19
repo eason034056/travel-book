@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
 const router = vi.hoisted(() => ({
@@ -32,6 +32,8 @@ vi.mock("@/lib/trip-photo-upload-client", () => ({
     if (phase === "finalizing") return `Finalizing ${total} photo${total === 1 ? "" : "s"}...`;
     return `Preparing ${total} photo${total === 1 ? "" : "s"}...`;
   },
+  getTripPhotoUploadPercent: ({ current, total }: { current: number; total: number }) =>
+    total === 0 ? 0 : Math.min(100, Math.round((current / total) * 100)),
   uploadTripPhotosDirect: uploadTripPhotosDirectMock
 }));
 vi.mock("@/components/trips/route-editor-map", () => ({
@@ -462,6 +464,59 @@ test("uploads photos through the direct R2 flow and refreshes the route", async 
   expect(router.refresh).toHaveBeenCalled();
   expect(toast.success).toHaveBeenCalledWith("2 photos uploaded");
   expect(toast.error).toHaveBeenCalledWith("1 photo failed to upload");
+});
+
+test("shows a photo upload progress bar while files upload", async () => {
+  let resolveUpload: ((value: {
+    assignments: { assigned: []; unassigned: [] };
+    failedCount: number;
+    failedFiles: string[];
+    totalFiles: number;
+    uploadedCount: number;
+  }) => void) | null = null;
+
+  uploadTripPhotosDirectMock.mockImplementationOnce(
+    ({ onProgress }: { onProgress?: (progress: { current: number; phase: string; total: number }) => void }) => {
+      onProgress?.({ current: 0, phase: "preparing", total: 3 });
+      onProgress?.({ current: 1, phase: "uploading", total: 3 });
+
+      return new Promise((resolve) => {
+        resolveUpload = resolve;
+      });
+    }
+  );
+
+  render(<TripStudio initialSnapshot={ownerSnapshot} mode="edit" />);
+
+  fireEvent.click(screen.getByRole("button", { name: /edit photo library/i }));
+
+  const input = document.querySelector("#photo-library input[type='file']") as HTMLInputElement;
+
+  fireEvent.change(input, {
+    target: {
+      files: [
+        new File(["one"], "torii.jpg", { type: "image/jpeg" }),
+        new File(["two"], "river.jpg", { type: "image/jpeg" }),
+        new File(["three"], "lantern.jpg", { type: "image/jpeg" })
+      ]
+    }
+  });
+
+  await waitFor(() => {
+    expect(screen.getAllByText(/uploading 1\/3/i).length).toBeGreaterThan(0);
+  });
+
+  expect(screen.getByRole("progressbar", { name: /photo upload progress/i })).toBeInTheDocument();
+
+  await act(async () => {
+    resolveUpload?.({
+      assignments: { assigned: [], unassigned: [] },
+      failedCount: 0,
+      failedFiles: [],
+      totalFiles: 3,
+      uploadedCount: 0
+    });
+  });
 });
 
 test("shows upload helper errors in the photo library", async () => {

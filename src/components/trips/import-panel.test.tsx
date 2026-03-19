@@ -9,6 +9,8 @@ vi.mock("@/lib/trip-photo-upload-client", () => ({
     if (phase === "finalizing") return `Finalizing ${total} photo${total === 1 ? "" : "s"}...`;
     return `Preparing ${total} photo${total === 1 ? "" : "s"}...`;
   },
+  getTripPhotoUploadPercent: ({ current, total }: { current: number; total: number }) =>
+    total === 0 ? 0 : Math.min(100, Math.round((current / total) * 100)),
   uploadTripPhotosDirect: uploadTripPhotosDirectMock
 }));
 

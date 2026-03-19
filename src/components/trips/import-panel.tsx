@@ -3,6 +3,8 @@
 import { startTransition, useState } from "react";
 
 import { formatTripPhotoUploadProgress, uploadTripPhotosDirect } from "@/lib/trip-photo-upload-client";
+import type { TripPhotoUploadProgress } from "@/lib/trip-photo-upload-contract";
+import { UploadProgress } from "@/components/trips/upload-progress";
 import type { TripDay } from "@/types/travel";
 
 interface ImportPanelProps {
@@ -24,6 +26,7 @@ export function ImportPanel({ tripId, timezone, days }: ImportPanelProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [photoStatus, setPhotoStatus] = useState<string>("Pending review");
+  const [photoProgress, setPhotoProgress] = useState<TripPhotoUploadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
 
@@ -59,7 +62,10 @@ export function ImportPanel({ tripId, timezone, days }: ImportPanelProps) {
         const uploadResult = await uploadTripPhotosDirect({
           days: days.map((day) => ({ date: day.date, id: day.id })),
           files,
-          onProgress: (progress) => setPhotoStatus(formatTripPhotoUploadProgress(progress)),
+          onProgress: (progress) => {
+            setPhotoProgress(progress);
+            setPhotoStatus(formatTripPhotoUploadProgress(progress));
+          },
           timezone,
           tripId
         });
@@ -75,6 +81,7 @@ export function ImportPanel({ tripId, timezone, days }: ImportPanelProps) {
       setError(caughtError instanceof Error ? caughtError.message : "Import failed");
     } finally {
       setIsPending(false);
+      setPhotoProgress(null);
     }
   }
 
@@ -93,6 +100,7 @@ export function ImportPanel({ tripId, timezone, days }: ImportPanelProps) {
           {photoStatus}
         </div>
       </div>
+      {photoProgress ? <UploadProgress className="mt-4 max-w-xl" label={photoStatus} progress={photoProgress} /> : null}
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
         <div className="grid gap-4">

@@ -25,7 +25,8 @@ import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Trash2, ArrowRightLeft, ChevronDown, ChevronUp, MapPin, Loader2 } from "lucide-react";
 
 import { formatTripPhotoUploadProgress, uploadTripPhotosDirect } from "@/lib/trip-photo-upload-client";
-import { MAX_TRIP_PHOTO_UPLOADS } from "@/lib/trip-photo-upload-contract";
+import { MAX_TRIP_PHOTO_UPLOADS, type TripPhotoUploadProgress } from "@/lib/trip-photo-upload-contract";
+import { UploadProgress } from "@/components/trips/upload-progress";
 import type { PlaceStop, TripStudioPhoto, TripStudioSnapshot } from "@/types/travel";
 import { computeCentroid } from "@/lib/geo-utils";
 import { isGoogleMapsShortLink, parseGoogleMapsLink } from "@/lib/google-maps-parser";
@@ -105,6 +106,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
   const [recentImportedStops, setRecentImportedStops] = useState<string[]>([]);
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const [photoUploadLabel, setPhotoUploadLabel] = useState("Upload trip photos");
+  const [photoUploadProgress, setPhotoUploadProgress] = useState<TripPhotoUploadProgress | null>(null);
   const [photoUploadInputKey, setPhotoUploadInputKey] = useState(0);
   const [showMobileEditShell, setShowMobileEditShell] = useState(false);
   const dirtyPhotoIdsRef = useRef<Set<string>>(new Set());
@@ -792,18 +794,21 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
     if (!initialSnapshot || files.length === 0) return;
 
     setUploadingPhotos(true);
-    setPhotoUploadLabel(
-      formatTripPhotoUploadProgress({
-        current: 0,
-        phase: "preparing",
-        total: files.length
-      })
-    );
+    const initialProgress = {
+      current: 0,
+      phase: "preparing" as const,
+      total: files.length
+    };
+    setPhotoUploadProgress(initialProgress);
+    setPhotoUploadLabel(formatTripPhotoUploadProgress(initialProgress));
     try {
       const uploadResult = await uploadTripPhotosDirect({
         days: days.map((day) => ({ date: day.date, id: day.id })),
         files,
-        onProgress: (progress) => setPhotoUploadLabel(formatTripPhotoUploadProgress(progress)),
+        onProgress: (progress) => {
+          setPhotoUploadProgress(progress);
+          setPhotoUploadLabel(formatTripPhotoUploadProgress(progress));
+        },
         timezone,
         tripId: initialSnapshot.id
       });
@@ -836,6 +841,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
     } finally {
       setUploadingPhotos(false);
       setPhotoUploadLabel("Upload trip photos");
+      setPhotoUploadProgress(null);
     }
   }
 
@@ -1195,6 +1201,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
           unassignedPhotos={unassignedPhotos}
           uploadInFlight={uploadingPhotos}
           uploadLabel={photoUploadLabel}
+          uploadProgress={photoUploadProgress}
           onAddStop={handleAddStop}
           onAssignPhotoDay={(photoId, dayId) =>
             updatePhotoDraft(photoId, { dayId, status: dayId ? "ready" : "unassigned" })
@@ -1450,6 +1457,7 @@ export function TripStudio({ mode, initialSnapshot }: TripStudioProps) {
                 savingBatch={savingBatchPhotos}
                 uploadInFlight={uploadingPhotos}
                 uploadLabel={photoUploadLabel}
+                uploadProgress={photoUploadProgress}
                 onUploadPhotos={handleUploadPhotos}
                 onBatchAssign={handleBatchAssignPhotos}
               />
@@ -2028,6 +2036,7 @@ function MobileEditShell(props: {
   unassignedPhotos: TripStudioPhoto[];
   uploadInFlight: boolean;
   uploadLabel: string;
+  uploadProgress: TripPhotoUploadProgress | null;
   onAddStop: () => void;
   onAssignPhotoDay: (photoId: string, dayId: string) => void;
   onChangeInviteEmail: (value: string) => void;
@@ -2187,6 +2196,9 @@ function MobileEditShell(props: {
                 <p className="mt-4 text-xs uppercase tracking-[0.18em] text-ink/58">
                   {props.uploadInFlight ? props.uploadLabel : `Upload up to ${MAX_TRIP_PHOTO_UPLOADS} photos per batch`}
                 </p>
+                {props.uploadInFlight && props.uploadProgress ? (
+                  <UploadProgress className="mt-3" label={props.uploadLabel} progress={props.uploadProgress} />
+                ) : null}
               </div>
 
               <div className="flex flex-wrap gap-2">
@@ -3116,6 +3128,7 @@ function PhotosSection(props: {
   savingBatch: boolean;
   uploadInFlight: boolean;
   uploadLabel: string;
+  uploadProgress: TripPhotoUploadProgress | null;
   onUploadPhotos: (files: File[]) => Promise<void>;
   onBatchAssign: () => void;
 }) {
@@ -3182,6 +3195,9 @@ function PhotosSection(props: {
               Pick files
             </span>
           </label>
+          {props.uploadInFlight && props.uploadProgress ? (
+            <UploadProgress className="mt-4" label={props.uploadLabel} progress={props.uploadProgress} />
+          ) : null}
           <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-ink/55 sm:mt-5">
             <span className="rounded-full border border-ink/10 bg-paper px-3 py-1">{props.photos.length} photos in library</span>
             <span className="rounded-full border border-ink/10 bg-paper px-3 py-1">{unassigned.length} unassigned</span>
