@@ -351,6 +351,70 @@ test("opens stories on the last edited day in the mobile workspace", () => {
   expect(screen.queryByDisplayValue("Kyoto")).not.toBeInTheDocument();
 });
 
+test("highlights the selected day card in mobile stories", () => {
+  stubMobileViewport();
+
+  render(<TripStudio initialSnapshot={richerSnapshot} mode="edit" />);
+
+  fireEvent.click(screen.getByRole("tab", { name: /^stories$/i }));
+
+  const storiesPanel = screen.getByRole("tabpanel", { name: /^stories$/i });
+  const dayOneButton = within(storiesPanel).getByRole("button", { name: /day 1/i });
+  const dayTwoButton = within(storiesPanel).getByRole("button", { name: /day 2/i });
+
+  expect(dayOneButton).toHaveAttribute("aria-pressed", "true");
+  expect(dayOneButton).toHaveClass("bg-ink");
+  expect(dayTwoButton).toHaveAttribute("aria-pressed", "false");
+  expect(dayTwoButton).not.toHaveClass("bg-ink");
+
+  fireEvent.click(dayTwoButton);
+
+  expect(dayTwoButton).toHaveAttribute("aria-pressed", "true");
+  expect(dayTwoButton).toHaveClass("bg-ink");
+  expect(dayOneButton).toHaveAttribute("aria-pressed", "false");
+  expect(dayOneButton).not.toHaveClass("bg-ink");
+});
+
+test("highlights the selected day cover photo in mobile stories", () => {
+  stubMobileViewport();
+
+  const mobileStoriesSnapshot: TripStudioSnapshot = {
+    ...richerSnapshot,
+    days: richerSnapshot.days.map((day) =>
+      day.id === "kyoto-day-1"
+        ? {
+          ...day,
+          heroPhotoPreviewUrl: "https://example.com/torii.jpg",
+          heroPhotoValue: "photos/torii.jpg"
+        }
+        : day
+    ),
+    photos: richerSnapshot.photos.map((photo) =>
+      photo.id === "photo-2" ? { ...photo, dayId: "kyoto-day-1" } : photo
+    )
+  };
+
+  render(<TripStudio initialSnapshot={mobileStoriesSnapshot} mode="edit" />);
+
+  fireEvent.click(screen.getByRole("tab", { name: /^stories$/i }));
+
+  const storiesPanel = screen.getByRole("tabpanel", { name: /^stories$/i });
+  const toriiPhotoButton = within(storiesPanel).getByRole("button", { name: /torii gates/i });
+  const riverPhotoButton = within(storiesPanel).getByRole("button", { name: /river walk/i });
+
+  expect(toriiPhotoButton).toHaveAttribute("aria-pressed", "true");
+  expect(toriiPhotoButton).toHaveClass("border-ink");
+  expect(riverPhotoButton).toHaveAttribute("aria-pressed", "false");
+  expect(riverPhotoButton).not.toHaveClass("border-ink");
+
+  fireEvent.click(riverPhotoButton);
+
+  expect(riverPhotoButton).toHaveAttribute("aria-pressed", "true");
+  expect(riverPhotoButton).toHaveClass("border-ink");
+  expect(toriiPhotoButton).toHaveAttribute("aria-pressed", "false");
+  expect(toriiPhotoButton).not.toHaveClass("border-ink");
+});
+
 test("moves newly uploaded photos into the mobile assign queue", async () => {
   stubMobileViewport();
   uploadTripPhotosDirectMock.mockResolvedValueOnce({

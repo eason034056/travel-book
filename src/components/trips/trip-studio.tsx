@@ -2603,25 +2603,43 @@ function MobileEditShell(props: {
                 {props.days.map((day) => {
                   const dayPhotosCount = props.photos.filter((photo) => photo.dayId === day.id).length;
                   const completed = isDayStoryComplete(day);
+                  const isSelectedDay = props.selectedDayId === day.id;
 
                   return (
                     <button
                       key={day.id}
+                      aria-pressed={isSelectedDay}
                       className={cn(
-                        "grid min-w-[9rem] gap-2 rounded-[1.4rem] border px-4 py-3 text-left",
-                        props.selectedDayId === day.id
-                          ? "border-olive/25 bg-olive/10"
-                          : "border-ink/10 bg-paper"
+                        "grid min-w-[9rem] gap-2 rounded-[1.4rem] border px-4 py-3 text-left transition-colors",
+                        isSelectedDay
+                          ? "border-ink bg-ink text-paper shadow-sm"
+                          : "border-ink/10 bg-paper text-ink"
                       )}
                       onClick={() => props.onChangeSelectedDay(day.id)}
                       type="button"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-[0.62rem] uppercase tracking-[0.18em] text-olive">Day {day.dayIndex}</span>
-                        <span className={cn("h-2.5 w-2.5 rounded-full", completed ? "bg-olive" : "bg-sand")} />
+                        <span className={cn(
+                          "font-mono text-[0.62rem] uppercase tracking-[0.18em]",
+                          isSelectedDay ? "text-paper/72" : "text-olive"
+                        )}
+                        >
+                          Day {day.dayIndex}
+                        </span>
+                        <span className={cn(
+                          "h-2.5 w-2.5 rounded-full",
+                          isSelectedDay
+                            ? completed ? "bg-paper" : "bg-paper/45"
+                            : completed ? "bg-olive" : "bg-sand"
+                        )}
+                        />
                       </div>
-                      <p className="truncate text-sm font-medium text-ink">{day.title || day.cityLabel || day.date}</p>
-                      <p className="text-xs text-ink/55">{dayPhotosCount} photo{dayPhotosCount === 1 ? "" : "s"} · {day.stops.length} stop{day.stops.length === 1 ? "" : "s"}</p>
+                      <p className={cn("truncate text-sm font-medium", isSelectedDay ? "text-paper" : "text-ink")}>
+                        {day.title || day.cityLabel || day.date}
+                      </p>
+                      <p className={cn("text-xs", isSelectedDay ? "text-paper/78" : "text-ink/55")}>
+                        {dayPhotosCount} photo{dayPhotosCount === 1 ? "" : "s"} · {day.stops.length} stop{day.stops.length === 1 ? "" : "s"}
+                      </p>
                     </button>
                   );
                 })}
@@ -2685,20 +2703,28 @@ function MobileEditShell(props: {
                         <p className="mt-1 text-sm text-ink/58">Promote one of today&apos;s frames as the cover art.</p>
                       </div>
                       <div className="grid grid-cols-4 gap-3">
-                        {props.selectedDayPhotos.map((photo) => (
-                          <button
-                            key={photo.id}
-                            className="overflow-hidden rounded-[1rem] border border-ink/10 bg-paper"
-                            onClick={() => props.onPickDayCover(photo, props.selectedDay!.id)}
-                            type="button"
-                          >
-                            <img
-                              alt={photo.alt || photo.originalFilename}
-                              className="aspect-square w-full object-cover"
-                              src={photo.previewUrl}
-                            />
-                          </button>
-                        ))}
+                        {props.selectedDayPhotos.map((photo) => {
+                          const isSelectedCover = props.selectedDay?.heroPhotoValue === photo.storageKey;
+
+                          return (
+                            <button
+                              key={photo.id}
+                              aria-pressed={isSelectedCover}
+                              className={cn(
+                                "overflow-hidden rounded-[1rem] border bg-paper transition",
+                                isSelectedCover ? "border-ink ring-2 ring-ink/55" : "border-ink/10"
+                              )}
+                              onClick={() => props.onPickDayCover(photo, props.selectedDay!.id)}
+                              type="button"
+                            >
+                              <img
+                                alt={photo.alt || photo.originalFilename}
+                                className="aspect-square w-full object-cover"
+                                src={photo.previewUrl}
+                              />
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
