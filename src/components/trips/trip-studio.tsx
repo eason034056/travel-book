@@ -2194,7 +2194,7 @@ function MobileEditShell(props: {
                   </label>
                 </div>
                 <p className="mt-4 text-xs uppercase tracking-[0.18em] text-ink/58">
-                  {props.uploadInFlight ? props.uploadLabel : `Upload up to ${MAX_TRIP_PHOTO_UPLOADS} photos per batch`}
+                  {`Upload up to ${MAX_TRIP_PHOTO_UPLOADS} photos per batch`}
                 </p>
                 {props.uploadInFlight && props.uploadProgress ? (
                   <UploadProgress className="mt-3" label={props.uploadLabel} progress={props.uploadProgress} />
