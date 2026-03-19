@@ -206,6 +206,126 @@ describe("uploadTripPhotosDirect", () => {
     });
   });
 
+  test("falls back to single-file server uploads when direct PUT is blocked", async () => {
+    const files = [
+      new File(["one"], "torii.jpg", { type: "image/jpeg" }),
+      new File(["two"], "river.jpg", { type: "image/jpeg" })
+    ];
+    const preparePayload: PrepareTripPhotoUploadsResponse = {
+      uploads: [
+        {
+          contentType: "image/jpeg",
+          originalFilename: "torii.jpg",
+          photoId: "photo-1",
+          storageKey: "trips/kyoto-2026/torii.jpg",
+          uploadUrl: "https://r2.example.com/torii.jpg"
+        },
+        {
+          contentType: "image/jpeg",
+          originalFilename: "river.jpg",
+          photoId: "photo-2",
+          storageKey: "trips/kyoto-2026/river.jpg",
+          uploadUrl: "https://r2.example.com/river.jpg"
+        }
+      ]
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === "/api/trips/kyoto-2026/photos/upload/prepare") {
+        return jsonResponse(preparePayload);
+      }
+
+      if (url === "https://r2.example.com/torii.jpg") {
+        return new Response(null, { status: 200 });
+      }
+
+      if (url === "https://r2.example.com/river.jpg") {
+        throw new TypeError("Failed to fetch");
+      }
+
+      if (url === "/api/trips/kyoto-2026/photos/upload/complete") {
+        return jsonResponse({
+          assigned: [{ dayId: "kyoto-day-1", photoId: "photo-1" }],
+          unassigned: [],
+          uploadedPhotos: [
+            {
+              alt: "",
+              dayId: "kyoto-day-1",
+              id: "photo-1",
+              originalFilename: "torii.jpg",
+              previewUrl: "https://example.com/torii.jpg",
+              status: "ready",
+              storageKey: "trips/kyoto-2026/torii.jpg"
+            }
+          ]
+        } satisfies CompleteTripPhotoUploadsResponse);
+      }
+
+      if (url === "/api/trips/kyoto-2026/photos/upload") {
+        return jsonResponse({
+          assigned: [],
+          unassigned: [{ photoId: "photo-2", reason: "missing-captured-at" }],
+          uploadedPhotos: [
+            {
+              alt: "",
+              dayId: "",
+              id: "photo-2",
+              originalFilename: "river.jpg",
+              previewUrl: "https://example.com/river.jpg",
+              status: "unassigned",
+              storageKey: "trips/kyoto-2026/river.jpg"
+            }
+          ]
+        } satisfies CompleteTripPhotoUploadsResponse);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    exifrParseMock.mockResolvedValue(undefined);
+
+    const result = await uploadTripPhotosDirect({
+      days: [{ date: "2026-04-12", id: "kyoto-day-1" }],
+      fetchImpl: fetchMock,
+      files,
+      timezone: "Asia/Tokyo",
+      tripId: "kyoto-2026"
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(result).toEqual({
+      assignments: {
+        assigned: [{ dayId: "kyoto-day-1", photoId: "photo-1" }],
+        unassigned: [{ photoId: "photo-2", reason: "missing-captured-at" }],
+        uploadedPhotos: [
+          {
+            alt: "",
+            dayId: "kyoto-day-1",
+            id: "photo-1",
+            originalFilename: "torii.jpg",
+            previewUrl: "https://example.com/torii.jpg",
+            status: "ready",
+            storageKey: "trips/kyoto-2026/torii.jpg"
+          },
+          {
+            alt: "",
+            dayId: "",
+            id: "photo-2",
+            originalFilename: "river.jpg",
+            previewUrl: "https://example.com/river.jpg",
+            status: "unassigned",
+            storageKey: "trips/kyoto-2026/river.jpg"
+          }
+        ]
+      },
+      failedCount: 0,
+      failedFiles: [],
+      totalFiles: 2,
+      uploadedCount: 2
+    });
+  });
+
   test("rejects batches larger than the supported upload limit", async () => {
     const files = Array.from({ length: MAX_TRIP_PHOTO_UPLOADS + 1 }, (_, index) =>
       new File([String(index)], `photo-${index + 1}.jpg`, { type: "image/jpeg" })

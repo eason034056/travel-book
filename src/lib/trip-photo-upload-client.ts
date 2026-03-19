@@ -91,6 +91,44 @@ function emptyAssignments(): CompleteTripPhotoUploadsResponse {
   };
 }
 
+function mergeAssignments(
+  current: CompleteTripPhotoUploadsResponse,
+  next: CompleteTripPhotoUploadsResponse
+): CompleteTripPhotoUploadsResponse {
+  const uploadedPhotos = (current.uploadedPhotos ?? []).concat(next.uploadedPhotos ?? []);
+
+  return {
+    assigned: current.assigned.concat(next.assigned),
+    unassigned: current.unassigned.concat(next.unassigned),
+    ...(uploadedPhotos.length > 0 ? { uploadedPhotos } : {})
+  };
+}
+
+async function uploadTripPhotoViaServer(options: {
+  tripId: string;
+  timezone: string;
+  days: TripPhotoUploadDay[];
+  file: File;
+  fetchImpl: typeof fetch;
+}) {
+  const formData = new FormData();
+
+  formData.set("tripDays", JSON.stringify(options.days));
+  formData.set("timezone", options.timezone);
+  formData.append("photos", options.file);
+
+  const response = await options.fetchImpl(`/api/trips/${options.tripId}/photos/upload`, {
+    body: formData,
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, "Unable to upload photos"));
+  }
+
+  return (await response.json()) as CompleteTripPhotoUploadsResponse;
+}
+
 export async function uploadTripPhotosDirect(options: {
   tripId: string;
   timezone: string;
@@ -148,12 +186,13 @@ export async function uploadTripPhotosDirect(options: {
   const preparePayload = (await prepareResponse.json()) as PrepareTripPhotoUploadsResponse;
   const failedFiles: string[] = [];
   const completedUploads: CompleteTripPhotoUploadsRequest["uploads"] = [];
+  const serverFallbackFiles: File[] = [];
 
   for (const [index, file] of uploadableFiles.entries()) {
     const preparedUpload = preparePayload.uploads[index];
 
     if (!preparedUpload) {
-      failedFiles.push(file.name);
+      serverFallbackFiles.push(file);
       continue;
     }
 
@@ -163,17 +202,24 @@ export async function uploadTripPhotosDirect(options: {
       total: uploadableFiles.length
     });
 
-    const uploadResponse = await fetchImpl(preparedUpload.uploadUrl, {
-      body: file,
-      headers: {
-        "Content-Type": preparedUpload.contentType
-      },
-      method: "PUT"
-    });
+    let uploadResponse: Response;
+
+    try {
+      uploadResponse = await fetchImpl(preparedUpload.uploadUrl, {
+        body: file,
+        headers: {
+          "Content-Type": preparedUpload.contentType
+        },
+        method: "PUT"
+      });
+    } catch {
+      serverFallbackFiles.push(...uploadableFiles.slice(index));
+      break;
+    }
 
     if (!uploadResponse.ok) {
-      failedFiles.push(file.name);
-      continue;
+      serverFallbackFiles.push(...uploadableFiles.slice(index));
+      break;
     }
 
     completedUploads.push({
@@ -185,7 +231,63 @@ export async function uploadTripPhotosDirect(options: {
     });
   }
 
-  if (completedUploads.length === 0) {
+  let assignments = emptyAssignments();
+  let uploadedCount = 0;
+
+  if (completedUploads.length > 0) {
+    options.onProgress?.({
+      current: completedUploads.length,
+      phase: "finalizing",
+      total: completedUploads.length
+    });
+
+    const completeResponse = await fetchImpl(`/api/trips/${options.tripId}/photos/upload/complete`, {
+      body: JSON.stringify({
+        timezone: options.timezone,
+        tripDays: options.days,
+        uploads: completedUploads
+      } satisfies CompleteTripPhotoUploadsRequest),
+      headers: {
+        "Content-Type": "application/json"
+      },
+      method: "POST"
+    });
+
+    if (!completeResponse.ok) {
+      throw new Error(await parseErrorMessage(completeResponse, "Unable to finalize photo uploads"));
+    }
+
+    assignments = mergeAssignments(
+      assignments,
+      (await completeResponse.json()) as CompleteTripPhotoUploadsResponse
+    );
+    uploadedCount += completedUploads.length;
+  }
+
+  for (const [index, file] of serverFallbackFiles.entries()) {
+    options.onProgress?.({
+      current: completedUploads.length + index + 1,
+      phase: "uploading",
+      total: uploadableFiles.length
+    });
+
+    try {
+      const fallbackAssignments = await uploadTripPhotoViaServer({
+        days: options.days,
+        fetchImpl,
+        file,
+        timezone: options.timezone,
+        tripId: options.tripId
+      });
+
+      assignments = mergeAssignments(assignments, fallbackAssignments);
+      uploadedCount += fallbackAssignments.uploadedPhotos?.length ?? 1;
+    } catch {
+      failedFiles.push(file.name);
+    }
+  }
+
+  if (uploadedCount === 0) {
     return {
       assignments: emptyAssignments(),
       failedCount: failedFiles.length,
@@ -195,33 +297,11 @@ export async function uploadTripPhotosDirect(options: {
     };
   }
 
-  options.onProgress?.({
-    current: completedUploads.length,
-    phase: "finalizing",
-    total: completedUploads.length
-  });
-
-  const completeResponse = await fetchImpl(`/api/trips/${options.tripId}/photos/upload/complete`, {
-    body: JSON.stringify({
-      timezone: options.timezone,
-      tripDays: options.days,
-      uploads: completedUploads
-    } satisfies CompleteTripPhotoUploadsRequest),
-    headers: {
-      "Content-Type": "application/json"
-    },
-    method: "POST"
-  });
-
-  if (!completeResponse.ok) {
-    throw new Error(await parseErrorMessage(completeResponse, "Unable to finalize photo uploads"));
-  }
-
   return {
-    assignments: (await completeResponse.json()) as CompleteTripPhotoUploadsResponse,
+    assignments,
     failedCount: failedFiles.length,
     failedFiles,
     totalFiles: uploadableFiles.length,
-    uploadedCount: completedUploads.length
+    uploadedCount
   };
 }
